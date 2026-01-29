@@ -1,7 +1,7 @@
 "use client";
 
-//import { LayoutReplit } from "../components/Layout.replit";
 import { StatCard } from "../components/StatCard";
+import { DailyChecklist } from "../components/checklist/DailyChecklist";
 import { useExams } from "@/hooks/use-exams";
 import { useRevision } from "@/hooks/use-revision";
 
@@ -57,7 +57,16 @@ export default function PlannerPage() {
 
       <div className="mt-10 space-y-12">
 
-        {/* ---------- Upcoming Exams ---------- */}
+        {/* ===================== */}
+        {/* TODAY'S CHECKLIST */}
+        {/* ===================== */}
+        <section>
+          <DailyChecklist date={new Date()} />
+        </section>
+
+        {/* ===================== */}
+        {/* UPCOMING EXAMS */}
+        {/* ===================== */}
         <section>
           <h2 className="text-lg font-semibold mb-1">
             Upcoming exams
@@ -97,7 +106,9 @@ export default function PlannerPage() {
           </div>
         </section>
 
-        {/* ---------- Revision Plan ---------- */}
+        {/* ===================== */}
+        {/* REVISION PLAN */}
+        {/* ===================== */}
         <section>
           <h2 className="text-lg font-semibold mb-1">
             Revision plan
@@ -108,34 +119,33 @@ export default function PlannerPage() {
 
           <div className="space-y-3">
             {revision.tasks.map((task) => {
-            const dayLabel = formatDayLabel(task.date);
-            const isToday = dayLabel === "Today";
+              const dayLabel = formatDayLabel(task.date);
+              const isToday = dayLabel === "Today";
 
-            return (
+              return (
                 <div
-                key={task.id}
-                className={`flex items-center justify-between rounded-lg border p-4
+                  key={task.id}
+                  className={`flex items-center justify-between rounded-lg border p-4
                     ${isToday ? "bg-blue-50 border-blue-200" : "bg-white"}
-                `}
+                  `}
                 >
-                <div>
+                  <div>
                     <div className="font-medium">{task.subject}</div>
                     <div className="text-sm text-gray-500">
-                    {task.duration_minutes} mins · {dayLabel}
+                      {task.duration_minutes} mins · {dayLabel}
                     </div>
-                </div>
+                  </div>
 
-                {isToday ? (
+                  {isToday ? (
                     <span className="text-xs font-medium text-blue-700 bg-blue-100 px-2 py-1 rounded-full">
-                    Today
+                      Today
                     </span>
-                ) : (
+                  ) : (
                     <span className="text-sm">⏱️</span>
-                )}
+                  )}
                 </div>
-            );
+              );
             })}
-
 
             {revision.tasks.length === 0 && (
               <div className="rounded-lg border bg-gray-50 p-4 text-sm text-gray-500">
