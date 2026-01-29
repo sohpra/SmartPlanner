@@ -1,9 +1,21 @@
 export function useRevision() {
+  const tasks = [
+    {
+      id: "a",
+      subject: "Maths",
+      duration: 30,
+      scheduledFor: "Today",
+    },
+    {
+      id: "b",
+      subject: "Biology",
+      duration: 45,
+      scheduledFor: "Tomorrow",
+    },
+  ];
+
   return {
-    tasks: [
-      { id: "a", subject: "Maths" },
-      { id: "b", subject: "Biology" },
-    ],
+    tasks,
   };
 }
 

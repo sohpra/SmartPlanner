@@ -2,14 +2,27 @@
 //import { api, buildUrl, type ExamInput } from "@shared/routes";
 
 export function useExams() {
+  const upcoming = [
+    {
+      id: "1",
+      subject: "Maths",
+      date: "2026-03-12",
+      examType: "GCSE",
+    },
+    {
+      id: "2",
+      subject: "Biology",
+      date: "2026-03-20",
+      examType: "GCSE",
+    },
+  ];
+
   return {
-    upcoming: [
-      { id: "1", subject: "Maths" },
-      { id: "2", subject: "Biology" },
-    ],
+    upcoming,
     subjectCount: 2,
   };
 }
+
 
 
 // GET /api/exams
