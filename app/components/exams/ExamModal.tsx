@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase/client";
-
+import { useSubjects } from "@/hooks/use-subjects";
 
 
 type ExamType = "internal" | "board" | "competitive";
@@ -29,20 +29,12 @@ export function ExamModal({ open, onClose }: Props) {
   const [examName, setExamName] = useState("");
 
   // Subjects
-  const SUBJECTS = [
-  "Maths",
-  "Biology",
-  "Physics",
-  "Chemistry",
-  "English",
-  "History",
-  "Geography",
-  "Computer Science",
-  "French",
-  "Spanish",
-  "Latin",
-  "DE",
-];
+  // Subjects
+  const { subjects, loading } = useSubjects();
+
+  useEffect(() => {
+    setSubject("");
+  }, [examType]);
 
   if (!open) return null;
 
@@ -135,14 +127,19 @@ export function ExamModal({ open, onClose }: Props) {
             className="mt-1 w-full rounded border p-2"
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
+            disabled={loading}
           >
-            <option value="">Select subject</option>
-            {SUBJECTS.map((s) => (
-              <option key={s} value={s}>
-                {s}
+            <option value="">
+              {loading ? "Loading subjects…" : "Select subject"}
+            </option>
+
+            {subjects.map((s) => (
+              <option key={s.id} value={s.name}>
+                {s.name}
               </option>
             ))}
           </select>
+
 
         </label>
 
@@ -247,6 +244,7 @@ export function ExamModal({ open, onClose }: Props) {
           >
             Create exam
           </button>
+
         </div>
       </div>
     </div>
