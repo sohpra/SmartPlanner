@@ -11,19 +11,44 @@ export default function PlannerPage() {
 
   return (
     <LayoutReplit>
-      {/* Stat cards */}
+      {/* ===================== */}
+      {/* STAT CARDS */}
+      {/* ===================== */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatCard title="Upcoming exams" value={exams.upcoming.length} icon="📝" />
-        <StatCard title="Subjects" value={exams.subjectCount} icon="📚" />
-        <StatCard title="Revision tasks" value={revision.tasks.length} icon="⏱️" />
+        <StatCard
+          title="Upcoming exams"
+          value={exams.upcoming.length}
+          icon="📝"
+        />
+        <StatCard
+          title="Subjects"
+          value={exams.subjectCount}
+          icon="📚"
+        />
+        <StatCard
+          title="Revision tasks"
+          value={revision.tasks.length}
+          icon="⏱️"
+        />
       </div>
 
-      {/* Main dashboard sections */}
-      <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <p className="mt-4 text-sm text-gray-500">
+        Overview based on your current planner data
+      </p>
 
-        {/* Upcoming exams */}
+      {/* ===================== */}
+      {/* MAIN DASHBOARD */}
+      {/* ===================== */}
+      <div className="mt-10 space-y-12">
+
+        {/* ---------- Upcoming Exams ---------- */}
         <section>
-          <h2 className="text-lg font-semibold mb-4">Upcoming exams</h2>
+          <h2 className="text-lg font-semibold mb-1">
+            Upcoming exams
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Exams scheduled in the next few weeks
+          </p>
 
           <div className="space-y-3">
             {exams.upcoming.map((exam) => (
@@ -32,50 +57,70 @@ export default function PlannerPage() {
                 className="flex items-center justify-between rounded-lg border bg-white p-4"
               >
                 <div>
-                  <div className="font-medium">{exam.subject}</div>
+                  <div className="font-medium">
+                    {exam.subject}
+                  </div>
                   <div className="text-sm text-gray-500">
                     {exam.examType} · {exam.date}
                   </div>
                 </div>
-                <div className="text-sm text-gray-600">
+                <div className="text-sm">
                   📅
                 </div>
               </div>
             ))}
 
             {exams.upcoming.length === 0 && (
-              <div className="text-sm text-gray-500 italic">
-                No upcoming exams
+              <div className="rounded-lg border bg-gray-50 p-4 text-sm text-gray-500">
+                🎉 No upcoming exams — you’re all caught up!
               </div>
             )}
           </div>
         </section>
 
-        {/* Revision tasks */}
+        {/* ---------- Revision Plan ---------- */}
         <section>
-          <h2 className="text-lg font-semibold mb-4">Revision plan</h2>
+          <h2 className="text-lg font-semibold mb-1">
+            Revision plan
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            What you should revise today and next
+          </p>
 
           <div className="space-y-3">
-            {revision.tasks.map((task) => (
-              <div
-                key={task.id}
-                className="flex items-center justify-between rounded-lg border bg-white p-4"
-              >
-                <div>
-                  <div className="font-medium">{task.subject}</div>
-                  <div className="text-sm text-gray-500">
-                    {task.duration} mins · {task.scheduledFor}
+            {revision.tasks.map((task) => {
+              const isToday = task.scheduledFor === "Today";
+
+              return (
+                <div
+                  key={task.id}
+                  className={`flex items-center justify-between rounded-lg border p-4
+                    ${isToday ? "bg-blue-50 border-blue-200" : "bg-white"}
+                  `}
+                >
+                  <div>
+                    <div className="font-medium">
+                      {task.subject}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      {task.duration} mins · {task.scheduledFor}
+                    </div>
                   </div>
+
+                  {isToday ? (
+                    <span className="text-xs font-medium text-blue-700 bg-blue-100 px-2 py-1 rounded-full">
+                      Today
+                    </span>
+                  ) : (
+                    <span className="text-sm">⏱️</span>
+                  )}
                 </div>
-                <div className="text-sm">
-                  ⏱️
-                </div>
-              </div>
-            ))}
+              );
+            })}
 
             {revision.tasks.length === 0 && (
-              <div className="text-sm text-gray-500 italic">
-                No revision tasks scheduled
+              <div className="rounded-lg border bg-gray-50 p-4 text-sm text-gray-500">
+                📭 No revision tasks scheduled yet
               </div>
             )}
           </div>
