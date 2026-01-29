@@ -11,7 +11,6 @@ interface LayoutReplitProps {
 const navItems = [
   { href: "/planner", label: "Dashboard" },
   { href: "/calendar", label: "Calendar" },
-  { href: "/exams/new", label: "Add exam" },
   { href: "/exams", label: "Exams" },
   { href: "/weekly", label: "Weekly Tasks" },
   { href: "/generator", label: "Generator" },

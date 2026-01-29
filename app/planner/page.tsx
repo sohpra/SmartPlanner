@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutReplit } from "../components/Layout.replit";
+//import { LayoutReplit } from "../components/Layout.replit";
 import { StatCard } from "../components/StatCard";
 import { useExams } from "@/hooks/use-exams";
 import { useRevision } from "@/hooks/use-revision";
@@ -29,7 +29,7 @@ export default function PlannerPage() {
   const revision = useRevision();
 
   return (
-    <LayoutReplit>
+    <>
       {/* ===================== */}
       {/* STAT CARDS */}
       {/* ===================== */}
@@ -146,6 +146,6 @@ export default function PlannerPage() {
         </section>
 
       </div>
-    </LayoutReplit>
+    </>
   );
 }
