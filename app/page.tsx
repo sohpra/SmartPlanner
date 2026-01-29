@@ -36,14 +36,23 @@ export default function HomePage() {
         Signed in as <strong>{email}</strong>
       </p>
 
-      <button
-        onClick={async () => {
-          await supabase.auth.signOut();
-          router.replace("/login");
-        }}
-      >
-        Sign out
-      </button>
+      <div style={{ marginTop: 16 }}>
+        <button
+          onClick={() => router.push("/planner")}
+          style={{ marginRight: 12 }}
+        >
+          Go to Planner
+        </button>
+
+        <button
+          onClick={async () => {
+            await supabase.auth.signOut();
+            router.replace("/login");
+          }}
+        >
+          Sign out
+        </button>
+      </div>
     </div>
   );
 }
