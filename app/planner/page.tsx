@@ -52,23 +52,29 @@ export default function PlannerPage() {
 
           <div className="space-y-3">
             {exams.upcoming.map((exam) => (
-              <div
+            <div
                 key={exam.id}
                 className="flex items-center justify-between rounded-lg border bg-white p-4"
-              >
+            >
                 <div>
-                  <div className="font-medium">
+                <div className="font-medium">
                     {exam.subject}
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {exam.examType} · {exam.date}
-                  </div>
+                </div>
+                <div className="text-sm text-gray-500">
+                    {exam.exam_type} ·{" "}
+                    {new Date(exam.date).toLocaleDateString("en-GB", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                    })}
+                </div>
                 </div>
                 <div className="text-sm">
-                  📅
+                📅
                 </div>
-              </div>
+            </div>
             ))}
+
 
             {exams.upcoming.length === 0 && (
               <div className="rounded-lg border bg-gray-50 p-4 text-sm text-gray-500">
