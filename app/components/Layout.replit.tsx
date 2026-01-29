@@ -13,6 +13,7 @@ const navItems = [
   { href: "/calendar", label: "Calendar" },
   { href: "/exams", label: "Exams" },
   { href: "/weekly-tasks", label: "Weekly Tasks" },
+  { href: "/projects", label: "Projects" },
   { href: "/generator", label: "Generator" },
 ];
 
