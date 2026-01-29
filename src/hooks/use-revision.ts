@@ -1,3 +1,15 @@
+export function useRevision() {
+  return {
+    tasks: [
+      { id: "a", subject: "Maths" },
+      { id: "b", subject: "Biology" },
+    ],
+  };
+}
+
+
+
+/*
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl, type RevisionSlotInput } from "@shared/routes";
 
@@ -107,3 +119,4 @@ export function useGenerateTimetable() {
     },
   });
 }
+*/

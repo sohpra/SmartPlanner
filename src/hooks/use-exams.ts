@@ -1,7 +1,19 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, buildUrl, type ExamInput } from "@shared/routes";
+//import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+//import { api, buildUrl, type ExamInput } from "@shared/routes";
+
+export function useExams() {
+  return {
+    upcoming: [
+      { id: "1", subject: "Maths" },
+      { id: "2", subject: "Biology" },
+    ],
+    subjectCount: 2,
+  };
+}
+
 
 // GET /api/exams
+/*
 export function useExams() {
   return useQuery({
     queryKey: [api.exams.list.path],
@@ -76,3 +88,4 @@ export function useDeleteExam() {
     },
   });
 }
+*/

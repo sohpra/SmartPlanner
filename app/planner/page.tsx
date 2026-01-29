@@ -1,21 +1,6 @@
 "use client";
 
-import { Layout } from "../components/Layout";
-import { StatCard } from "../components/StatCard";
-import { useExams } from "@/hooks/use-exams";
-import { useRevision } from "@/hooks/use-revision";
-
-export default function PlannerPage() {
-  return (
-    <Layout>
-      <div>Planner OK</div>
-    </Layout>
-  );
-}
-
-
-/*
-import { Layout } from "../components/Layout";
+import { LayoutReplit } from "../components/Layout.replit";
 import { StatCard } from "../components/StatCard";
 import { useExams } from "@/hooks/use-exams";
 import { useRevision } from "@/hooks/use-revision";
@@ -25,7 +10,7 @@ export default function PlannerPage() {
   const revision = useRevision();
 
   return (
-    <Layout>
+    <LayoutReplit>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard
           title="Upcoming exams"
@@ -46,10 +31,10 @@ export default function PlannerPage() {
         />
       </div>
 
-      <div className="mt-10 text-muted-foreground">
-        Planner dashboard UI — mock data
+      {/* Next sections will go here */}
+      <div className="mt-10 text-sm text-muted-foreground">
+        Planner dashboard — mock data
       </div>
-    </Layout>
+    </LayoutReplit>
   );
 }
-*/
