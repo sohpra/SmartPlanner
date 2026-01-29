@@ -5,6 +5,25 @@ import { StatCard } from "../components/StatCard";
 import { useExams } from "@/hooks/use-exams";
 import { useRevision } from "@/hooks/use-revision";
 
+function formatDayLabel(dateString: string) {
+  const today = new Date();
+  const target = new Date(dateString);
+
+  today.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+
+  const diffDays =
+    (target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Tomorrow";
+
+  return target.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+}
+
 export default function PlannerPage() {
   const exams = useExams();
   const revision = useRevision();
@@ -36,9 +55,6 @@ export default function PlannerPage() {
         Overview based on your current planner data
       </p>
 
-      {/* ===================== */}
-      {/* MAIN DASHBOARD */}
-      {/* ===================== */}
       <div className="mt-10 space-y-12">
 
         {/* ---------- Upcoming Exams ---------- */}
@@ -52,29 +68,26 @@ export default function PlannerPage() {
 
           <div className="space-y-3">
             {exams.upcoming.map((exam) => (
-            <div
+              <div
                 key={exam.id}
                 className="flex items-center justify-between rounded-lg border bg-white p-4"
-            >
+              >
                 <div>
-                <div className="font-medium">
+                  <div className="font-medium">
                     {exam.subject}
-                </div>
-                <div className="text-sm text-gray-500">
+                  </div>
+                  <div className="text-sm text-gray-500">
                     {exam.exam_type} ·{" "}
                     {new Date(exam.date).toLocaleDateString("en-GB", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
                     })}
+                  </div>
                 </div>
-                </div>
-                <div className="text-sm">
-                📅
-                </div>
-            </div>
+                <div className="text-sm">📅</div>
+              </div>
             ))}
-
 
             {exams.upcoming.length === 0 && (
               <div className="rounded-lg border bg-gray-50 p-4 text-sm text-gray-500">
@@ -95,34 +108,34 @@ export default function PlannerPage() {
 
           <div className="space-y-3">
             {revision.tasks.map((task) => {
-              const isToday = task.scheduledFor === "Today";
+            const dayLabel = formatDayLabel(task.date);
+            const isToday = dayLabel === "Today";
 
-              return (
+            return (
                 <div
-                  key={task.id}
-                  className={`flex items-center justify-between rounded-lg border p-4
+                key={task.id}
+                className={`flex items-center justify-between rounded-lg border p-4
                     ${isToday ? "bg-blue-50 border-blue-200" : "bg-white"}
-                  `}
+                `}
                 >
-                  <div>
-                    <div className="font-medium">
-                      {task.subject}
-                    </div>
+                <div>
+                    <div className="font-medium">{task.subject}</div>
                     <div className="text-sm text-gray-500">
-                      {task.duration} mins · {task.scheduledFor}
+                    {task.duration_minutes} mins · {dayLabel}
                     </div>
-                  </div>
-
-                  {isToday ? (
-                    <span className="text-xs font-medium text-blue-700 bg-blue-100 px-2 py-1 rounded-full">
-                      Today
-                    </span>
-                  ) : (
-                    <span className="text-sm">⏱️</span>
-                  )}
                 </div>
-              );
+
+                {isToday ? (
+                    <span className="text-xs font-medium text-blue-700 bg-blue-100 px-2 py-1 rounded-full">
+                    Today
+                    </span>
+                ) : (
+                    <span className="text-sm">⏱️</span>
+                )}
+                </div>
+            );
             })}
+
 
             {revision.tasks.length === 0 && (
               <div className="rounded-lg border bg-gray-50 p-4 text-sm text-gray-500">
