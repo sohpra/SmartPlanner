@@ -1,123 +1,207 @@
 "use client";
 
+import { useMemo } from "react";
+
 import { useExams } from "@/hooks/use-exams";
-import { planRevisionSlots } from "@/lib/planner/revisionEngine";
+import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
+import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
 
-function toDateOnly(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
+import {
+  planRevisionSlots,
+  addDays,
+  toDateOnly,
+  daysBetween,
+} from "@/lib/planner/revisionEngine";
 
-function buildCapacityMap(start: Date, days = 7) {
-  const map: Record<string, number> = {};
+/* ---------- helpers ---------- */
 
+function buildBaseCapacity(start: string, days: number) {
+  const out: Record<string, number> = {};
   for (let i = 0; i < days; i++) {
-    const d = new Date(start);
-    d.setDate(d.getDate() + i);
-    const day = d.getDay();
-    const isWeekend = day === 0 || day === 6;
-    map[toDateOnly(d)] = isWeekend ? 240 : 150;
+    const d = addDays(start, i);
+    const dow = new Date(d + "T00:00:00").getDay();
+    out[d] = dow === 0 || dow === 6 ? 240 : 150;
   }
-
-  return map;
+  return out;
 }
+
+/* ---------- component ---------- */
 
 export default function DebugRevisionPage() {
+  const today = toDateOnly(new Date().toISOString());
+  const numDays = 7;
+
   const exams = useExams();
+  const weekly = useWeeklyTasks();
+  const deadlines = useDeadlineTasks();
 
-  const today = new Date();
-  const todayStr = toDateOnly(today);
+  const windowDates = useMemo(
+    () => Array.from({ length: numDays }, (_, i) => addDays(today, i)),
+    [today]
+  );
 
-  if (exams.loading) {
-    return <div className="p-6">Loading exams…</div>;
-  }
+  const baseCapacity = useMemo(
+    () => buildBaseCapacity(today, numDays),
+    [today]
+  );
 
-  const revisionPlan = planRevisionSlots(exams.upcoming, {
-    startDate: todayStr,
-    numDays: 7,
-    capacityByDate: buildCapacityMap(today, 7),
-    includeExamDay: false,
-  });
+  /* ============================================================
+     WEEKLY TASKS (fixed)
+     ============================================================ */
+
+  const weeklyByDate = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const d of windowDates) map[d] = 0;
+
+    for (const task of weekly.tasks) {
+      for (const d of windowDates) {
+        const dow = new Date(d + "T00:00:00").getDay();
+        if (dow === task.day_of_week) {
+          map[d] += task.duration_minutes;
+        }
+      }
+    }
+    return map;
+  }, [weekly.tasks, windowDates]);
+
+  /* ============================================================
+     DEADLINE TASKS — LAP, once, before due date
+     ============================================================ */
+
+  const deadlineByDate = useMemo(() => {
+    const remainingCap: Record<string, number> = {};
+    const map: Record<string, number> = {};
+
+    for (const d of windowDates) {
+      remainingCap[d] = baseCapacity[d] - weeklyByDate[d];
+      map[d] = 0;
+    }
+
+    const ordered = [...deadlines.tasks].sort(
+      (a, b) => daysBetween(today, a.due_date) - daysBetween(today, b.due_date)
+    );
+
+    for (const task of ordered) {
+      let remaining = task.estimated_minutes;
+
+      for (let i = windowDates.length - 1; i >= 0; i--) {
+        const d = windowDates[i];
+        if (d >= task.due_date) continue;
+        if (remainingCap[d] <= 0) continue;
+
+        const used = Math.min(remainingCap[d], remaining);
+        map[d] += used;
+        remainingCap[d] -= used;
+        remaining -= used;
+
+        if (remaining <= 0) break;
+      }
+    }
+
+    return map;
+  }, [deadlines.tasks, windowDates, baseCapacity, weeklyByDate, today]);
+
+  /* ============================================================
+     REVISION — SOFT CAPACITY (ALLOW OVERLOAD)
+     ============================================================ */
+
+  const revisionCapacity = useMemo(() => {
+    const cap: Record<string, number> = {};
+    for (const d of windowDates) {
+      cap[d] =
+        baseCapacity[d] -
+        weeklyByDate[d] -
+        deadlineByDate[d];
+    }
+    return cap;
+  }, [baseCapacity, weeklyByDate, deadlineByDate, windowDates]);
+
+  const revisionPlan = useMemo(() => {
+    return planRevisionSlots(exams.upcoming, {
+      startDate: today,
+      numDays,
+      capacityByDate: revisionCapacity,
+      includeExamDay: false,
+    });
+  }, [exams.upcoming, today, numDays, revisionCapacity]);
+
+  /* ============================================================
+     RENDER
+     ============================================================ */
 
   return (
     <div className="p-8 space-y-8">
-      <h1 className="text-2xl font-semibold">
-        🔍 Revision Engine Debug
-      </h1>
+      <h1 className="text-2xl font-semibold">🔍 Planner Debug</h1>
 
-      <div className="text-sm text-gray-600">
-        Start date: <strong>{todayStr}</strong>
-      </div>
+      {revisionPlan.days.map((day) => {
+        const base = baseCapacity[day.date];
+        const weeklyMins = weeklyByDate[day.date];
+        const deadlineMins = deadlineByDate[day.date];
+        const revisionMins = day.usedMinutes;
 
-      {/* ===================== */}
-      {/* DAILY PLANS */}
-      {/* ===================== */}
-      <div className="space-y-6">
-        {revisionPlan.days.map((day) => (
+        const hardUsed = weeklyMins + deadlineMins;
+        const totalUsed = hardUsed + revisionMins;
+        const overload = Math.max(0, totalUsed - base);
+
+        return (
           <div
             key={day.date}
-            className="rounded-lg border bg-white p-4"
+            className={`rounded-lg border p-4 space-y-3 ${
+              overload > 0 ? "bg-red-50 border-red-300" : "bg-white"
+            }`}
           >
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="font-medium">
-                {day.date}
-              </h2>
-              <div className="text-sm text-gray-500">
-                Used {day.usedMinutes} / {day.capacityMinutes} mins
+            <div className="flex justify-between">
+              <h2 className="font-medium">{day.date}</h2>
+              <div className="text-sm text-gray-600">
+                Total used {totalUsed} / {base} mins
+                {overload > 0 && (
+                  <span className="ml-2 text-red-600 font-medium">
+                    (+{overload} overload)
+                  </span>
+                )}
               </div>
             </div>
 
-            {day.slots.length === 0 ? (
-              <div className="text-sm text-gray-400">
-                No revision slots
-              </div>
-            ) : (
-              <ul className="space-y-1 text-sm">
-                {day.slots.map((slot, idx) => (
-                  <li key={idx}>
-                    • <strong>{slot.subject}</strong> —{" "}
-                    {slot.label} ({slot.slotMinutes} mins)
-                  </li>
-                ))}
-              </ul>
+            <ul className="text-sm space-y-1">
+              <li>🟦 Base: {base}</li>
+              <li>📌 Weekly: {weeklyMins}</li>
+              <li>📅 Deadlines: {deadlineMins}</li>
+              <li>⏱ Revision: {revisionMins}</li>
+            </ul>
+
+            {day.slots.length > 0 && (
+              <>
+                <div className="font-medium text-sm pt-2">
+                  Revision slots
+                </div>
+                <ul className="text-sm space-y-1">
+                  {day.slots.map((s, i) => (
+                    <li key={i}>
+                      • <strong>{s.subject}</strong> — {s.label} (
+                      {s.slotMinutes} mins)
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </div>
-        ))}
-      </div>
+        );
+      })}
 
-      {/* ===================== */}
-      {/* UNMET DEMAND */}
-      {/* ===================== */}
-      <div className="rounded-lg border bg-red-50 p-4">
-        <h2 className="font-medium mb-2">Unmet revision demand</h2>
-
-        {revisionPlan.unmet.length === 0 ? (
-          <div className="text-sm text-gray-600">
-            ✅ All revision demand scheduled
-          </div>
-        ) : (
+      {revisionPlan.unmet.length > 0 && (
+        <div className="rounded-lg border bg-red-100 p-4">
+          <h2 className="font-medium mb-2">
+            ❗ Unmet revision demand (even after overload)
+          </h2>
           <ul className="text-sm space-y-1">
             {revisionPlan.unmet.map((u) => (
               <li key={u.examId}>
-                • <strong>{u.subject}</strong> —{" "}
-                {u.remainingMinutes} mins remaining
-                (exam {u.examDate})
+                • <strong>{u.subject}</strong> — {u.remainingMinutes} mins
               </li>
             ))}
           </ul>
-        )}
-      </div>
-
-      {/* ===================== */}
-      {/* ENGINE NOTES */}
-      {/* ===================== */}
-      <div className="rounded-lg border bg-gray-50 p-4">
-        <h2 className="font-medium mb-2">Engine notes</h2>
-        <ul className="text-sm space-y-1">
-          {revisionPlan.notes.map((n, i) => (
-            <li key={i}>• {n}</li>
-          ))}
-        </ul>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
