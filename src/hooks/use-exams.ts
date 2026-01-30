@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
 type Exam = {
@@ -14,33 +14,29 @@ export function useExams() {
   const [upcoming, setUpcoming] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let isMounted = true;
+  const fetchExams = useCallback(async () => {
+    setLoading(true);
 
-    const fetchExams = async () => {
-      const { data, error } = await supabase
-        .from("exams")
-        .select("id, subject, exam_type, date")
-        .order("date", { ascending: true });
+    const { data, error } = await supabase
+      .from("exams")
+      .select("id, subject, exam_type, date")
+      .order("date", { ascending: true });
 
-      if (!isMounted) return;
+    console.log("FETCH EXAMS", data?.length);
 
-      if (error) {
-        console.error("Failed to fetch exams:", error);
-        setUpcoming([]);
-      } else {
-        setUpcoming(data ?? []);
-      }
+    if (error) {
+      console.error("Failed to fetch exams:", error);
+      setUpcoming([]);
+    } else {
+      setUpcoming(data ?? []);
+    }
 
-      setLoading(false);
-    };
-
-    fetchExams();
-
-    return () => {
-      isMounted = false;
-    };
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    fetchExams();
+  }, [fetchExams]);
 
   return {
     upcoming,
@@ -48,5 +44,6 @@ export function useExams() {
       new Set(upcoming.map((e) => e.subject))
     ).length,
     loading,
+    refresh: fetchExams, // 🔑 THIS is the missing piece
   };
 }

@@ -4,15 +4,15 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useSubjects } from "@/hooks/use-subjects";
 
-
 type ExamType = "internal" | "board" | "competitive";
 
 type Props = {
   open: boolean;
   onClose: () => void;
+  onAdded?: () => void; // ✅ NEW
 };
 
-export function ExamModal({ open, onClose }: Props) {
+export function ExamModal({ open, onClose, onAdded }: Props) {
   const [examType, setExamType] = useState<ExamType>("internal");
   const [subject, setSubject] = useState("");
   const [date, setDate] = useState("");
@@ -29,7 +29,6 @@ export function ExamModal({ open, onClose }: Props) {
   const [examName, setExamName] = useState("");
 
   // Subjects
-  // Subjects
   const { subjects, loading } = useSubjects();
 
   useEffect(() => {
@@ -45,58 +44,58 @@ export function ExamModal({ open, onClose }: Props) {
   }
 
   function removeTopic(topic: string) {
-    setTopics(topics.filter(t => t !== topic));
+    setTopics(topics.filter((t) => t !== topic));
   }
 
   async function handleSubmit() {
-  if (!subject || !date) {
-    alert("Subject and date are required");
-    return;
-  }
+    if (!subject || !date) {
+      alert("Subject and date are required");
+      return;
+    }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-  if (userError || !user) {
-    alert("Not authenticated");
-    return;
-  }
+    if (userError || !user) {
+      alert("Not authenticated");
+      return;
+    }
 
-  const base = {
-    user_id: user.id,
-    subject,
-    exam_type:
+    const base = {
+      user_id: user.id,
+      subject,
+      exam_type:
+        examType === "internal"
+          ? "Internal"
+          : examType === "board"
+          ? "Board"
+          : "Competitive",
+      date: date,
+      preparedness,
+    };
+
+    const payload =
       examType === "internal"
-        ? "Internal"
+        ? { ...base, topics }
         : examType === "board"
-        ? "Board"
-        : "Competitive",
-    date: new Date(date).toISOString(),
-    preparedness,
-  };
+        ? { ...base, exam_board: examBoard }
+        : { ...base, competitive_exam_name: examName };
 
-  const payload =
-    examType === "internal"
-      ? { ...base, topics }
-      : examType === "board"
-      ? { ...base, exam_board: examBoard }
-      : { ...base, competitive_exam_name: examName };
+    const { error } = await supabase.from("exams").insert(payload);
 
-  const { error } = await supabase
-    .from("exams")
-    .insert(payload);
+    if (error) {
+      console.error(error);
+      alert(error.message);
+      return;
+    }
 
-  if (error) {
-    console.error(error);
-    alert(error.message);
-    return;
+    // 🔑 notify parent that an exam was added
+    onAdded?.();
+
+    onClose();
   }
-
-  onClose();
-}
-
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -139,8 +138,6 @@ export function ExamModal({ open, onClose }: Props) {
               </option>
             ))}
           </select>
-
-
         </label>
 
         {/* Conditional fields */}
@@ -231,10 +228,7 @@ export function ExamModal({ open, onClose }: Props) {
 
         {/* Actions */}
         <div className="flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="rounded border px-4 py-2"
-          >
+          <button onClick={onClose} className="rounded border px-4 py-2">
             Cancel
           </button>
           <button
@@ -244,7 +238,6 @@ export function ExamModal({ open, onClose }: Props) {
           >
             Create exam
           </button>
-
         </div>
       </div>
     </div>
