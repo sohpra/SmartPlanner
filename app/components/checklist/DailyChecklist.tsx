@@ -4,11 +4,22 @@ import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
 import { useProjects } from "@/hooks/use-projects";
 import { useDailyCompletions } from "@/hooks/use-daily-completions";
 
-type Props = {
-  date: Date;
+export type RevisionSlot = {
+  examId: string;
+  subject: string;
+  slotMinutes: number;
+  label: string;
 };
 
-export function DailyChecklist({ date }: Props) {
+type Props = {
+  date: Date;
+  revisionSlots?: RevisionSlot[]; // ✅ THIS is what TS was missing
+};
+
+export function DailyChecklist({
+  date,
+  revisionSlots = [],
+}: Props) {
   const dayIndex = date.getDay();
   const { completed, toggle } = useDailyCompletions(date);
 
@@ -114,9 +125,30 @@ export function DailyChecklist({ date }: Props) {
           Revision
         </h3>
 
-        <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
-          Revision plan not generated yet.
-        </div>
+        {revisionSlots.length === 0 ? (
+          <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
+            No revision planned for today.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {revisionSlots.map((slot, idx) => (
+              <div
+                key={`${slot.examId}-${idx}`}
+                className="flex items-center justify-between rounded-lg border bg-white p-3"
+              >
+                <div className="flex items-center gap-3">
+                  <input type="checkbox" disabled />
+
+                  <span className="text-sm">
+                    <strong>{slot.label}</strong> · {slot.slotMinutes} mins
+                  </span>
+                </div>
+
+                <span className="text-xs text-gray-400">Revision</span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

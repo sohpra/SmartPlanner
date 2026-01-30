@@ -9,7 +9,7 @@ type ExamType = "internal" | "board" | "competitive";
 type Props = {
   open: boolean;
   onClose: () => void;
-  onAdded?: () => void; // ✅ NEW
+  onAdded?: () => void;
 };
 
 export function ExamModal({ open, onClose, onAdded }: Props) {
@@ -31,9 +31,21 @@ export function ExamModal({ open, onClose, onAdded }: Props) {
   // Subjects
   const { subjects, loading } = useSubjects();
 
+  // 🔑 RESET FORM STATE ON OPEN (prevents stale dates & values)
   useEffect(() => {
-    setSubject("");
-  }, [examType]);
+    if (open) {
+      setExamType("internal");
+      setSubject("");
+      setDate("");
+      setPreparedness(50);
+
+      setTopics([]);
+      setTopicInput("");
+
+      setExamBoard("");
+      setExamName("");
+    }
+  }, [open]);
 
   if (!open) return null;
 
@@ -72,7 +84,7 @@ export function ExamModal({ open, onClose, onAdded }: Props) {
           : examType === "board"
           ? "Board"
           : "Competitive",
-      date: date,
+      date, // ✅ date-only, no timezone bugs
       preparedness,
     };
 
@@ -91,9 +103,7 @@ export function ExamModal({ open, onClose, onAdded }: Props) {
       return;
     }
 
-    // 🔑 notify parent that an exam was added
     onAdded?.();
-
     onClose();
   }
 
@@ -140,7 +150,7 @@ export function ExamModal({ open, onClose, onAdded }: Props) {
           </select>
         </label>
 
-        {/* Conditional fields */}
+        {/* Internal */}
         {examType === "internal" && (
           <div className="mb-3">
             <span className="text-sm font-medium">Topics (optional)</span>
@@ -176,6 +186,7 @@ export function ExamModal({ open, onClose, onAdded }: Props) {
           </div>
         )}
 
+        {/* Board */}
         {examType === "board" && (
           <label className="block mb-3">
             <span className="text-sm font-medium">Exam board</span>
@@ -188,6 +199,7 @@ export function ExamModal({ open, onClose, onAdded }: Props) {
           </label>
         )}
 
+        {/* Competitive */}
         {examType === "competitive" && (
           <label className="block mb-3">
             <span className="text-sm font-medium">Exam name</span>
