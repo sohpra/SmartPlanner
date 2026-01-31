@@ -97,6 +97,18 @@ const DEFAULT_PROFILE_BY_TYPE: Record<ExamType, RevisionProfile> = {
   },
 };
 
+function hasFutureCapacity(
+  days: DailyRevisionPlan[],
+  fromDate: string,
+  examDate: string,
+  slotMinutes: number
+) {
+  return days.some(
+    (d) =>
+      d.date > fromDate && d.date < examDate && d.remainingMinutes >= slotMinutes
+  );
+}
+
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
@@ -210,28 +222,8 @@ export function planRevisionSlots(
     .map(buildRevisionDemand)
     .filter((d): d is RevisionDemand => {
       if (!d) return false;
-
-      // 🔒 invariant: past exams do not exist
       return daysBetween(opts.startDate, d.examDate) >= 0;
     });
-
-  if (demands.length === 0) {
-    return {
-      days: windowDates.map((date) => {
-        const cap = opts.capacityByDate[date] ?? 0;
-        return {
-          date,
-          capacityMinutes: cap,
-          usedMinutes: 0,
-          remainingMinutes: cap,
-          slots: [],
-        };
-      }),
-      demands: [],
-      unmet: [],
-      notes: ["No valid upcoming exams found to generate revision demands."],
-    };
-  }
 
   const days: DailyRevisionPlan[] = windowDates.map((date) => {
     const cap = opts.capacityByDate[date] ?? 0;
@@ -244,66 +236,86 @@ export function planRevisionSlots(
     };
   });
 
-  for (const day of days) {
-    if (day.remainingMinutes <= 0) continue;
+  if (demands.length === 0) {
+    return { days, demands: [], unmet: [], notes };
+  }
 
-    const eligible = demands.filter((d) => {
-      if (d.remainingSlots <= 0) return false;
+  /* ============================================================
+     PHASE A — FILL ALL AVAILABLE CAPACITY (EARLIEST FIRST)
+     ============================================================ */
 
-      const daysToExam = daysBetween(day.date, d.examDate);
-      if (daysToExam < 0) return false;
-      if (!includeExamDay && daysToExam === 0) return false;
+  let placedSomething = true;
 
-      return true;
-    });
+  while (placedSomething) {
+    placedSomething = false;
 
-    if (eligible.length === 0) continue;
+    for (const day of days) {
+      if (day.remainingMinutes <= 0) continue;
 
-    const ordered = sortDemandsForDay(eligible, day.date);
+      const eligible = demands
+        .filter((d) => {
+          if (d.remainingSlots <= 0) return false;
+          const daysToExam = daysBetween(day.date, d.examDate);
+          if (daysToExam < 0) return false;
+          if (!includeExamDay && daysToExam === 0) return false;
+          return day.remainingMinutes >= d.slotMinutes;
+        })
+        .sort((a, b) => {
+          const da = daysBetween(day.date, a.examDate);
+          const db = daysBetween(day.date, b.examDate);
+          if (da !== db) return da - db;
+          if (typePriority(a.examType) !== typePriority(b.examType)) {
+            return typePriority(b.examType) - typePriority(a.examType);
+          }
+          return a.preparedness - b.preparedness;
+        });
 
-    for (const d of ordered) {
-      if (day.remainingMinutes < d.slotMinutes) continue;
-      if (d.remainingSlots <= 0) continue;
+      if (eligible.length === 0) continue;
 
-      const daysToExam = daysBetween(day.date, d.examDate);
-      const maxSlotsToday = maxSlotsForExamOnDay(d, daysToExam);
+      const d = eligible[0];
 
-      const alreadyToday = day.slots.filter((s) => s.examId === d.examId).length;
-      if (alreadyToday >= maxSlotsToday) continue;
+      day.slots.push({
+        date: day.date,
+        examId: d.examId,
+        subject: d.subject,
+        examType: d.examType,
+        slotMinutes: d.slotMinutes,
+        label: makeLabel(d),
+      });
 
-      const isLastAllowedDay = !includeExamDay && daysToExam === 1;
+      d.remainingSlots--;
+      day.usedMinutes += d.slotMinutes;
+      day.remainingMinutes -= d.slotMinutes;
+      placedSomething = true;
+    }
+  }
 
-      // ✅ Rule: if includeExamDay=false, ensure there is revision on the day before.
-      // Minimal way: reserve 1 slot until day-before so we can’t schedule EVERYTHING too early.
-      const mustReserveOneForDayBefore = !includeExamDay && daysToExam > 1;
+  /* ============================================================
+     PHASE B — OVERLOAD (ONLY IF ABSOLUTELY NECESSARY)
+     ============================================================ */
 
-      const effectiveRemainingForToday = mustReserveOneForDayBefore
-        ? Math.max(0, d.remainingSlots - 1)
-        : d.remainingSlots;
+  const unmetAfterCapacity = demands.filter((d) => d.remainingSlots > 0);
 
-      if (effectiveRemainingForToday <= 0 && !isLastAllowedDay) {
-        continue; // keep the reserved slot for day-before
-      }
+  if (unmetAfterCapacity.length > 0) {
+    notes.push("Overload applied after exhausting all base capacity.");
 
-      const remainingDays = Math.max(1, daysToExam + 1); // includes today
-      const targetSlotsToday = isLastAllowedDay
-        ? d.remainingSlots // pull forward everything remaining
-        : Math.max(1, Math.ceil(effectiveRemainingForToday / remainingDays));
+    for (const d of unmetAfterCapacity) {
+      while (d.remainingSlots > 0) {
+        let targetDay: DailyRevisionPlan | undefined;
 
-      const remainingDailyCap = Math.max(0, maxSlotsToday - alreadyToday);
-      const maxByCapacity = Math.floor(day.remainingMinutes / d.slotMinutes);
+        for (let i = days.length - 1; i >= 0; i--) {
+          const day = days[i];
+          const daysToExam = daysBetween(day.date, d.examDate);
+          if (daysToExam < 0) continue;
+          if (!includeExamDay && daysToExam === 0) continue;
+          targetDay = day;
+          break;
+        }
 
-      const canPlace = Math.max(
-        0,
-        Math.min(targetSlotsToday, effectiveRemainingForToday, remainingDailyCap, maxByCapacity)
-      );
+        if (!targetDay) break;
 
-      for (let i = 0; i < canPlace; i++) {
-        if (day.remainingMinutes < d.slotMinutes) break;
-        if (d.remainingSlots <= 0) break;
-
-        day.slots.push({
-          date: day.date,
+        targetDay.slots.push({
+          date: targetDay.date,
           examId: d.examId,
           subject: d.subject,
           examType: d.examType,
@@ -312,13 +324,15 @@ export function planRevisionSlots(
         });
 
         d.remainingSlots--;
-        day.usedMinutes += d.slotMinutes;
-        day.remainingMinutes -= d.slotMinutes;
+        targetDay.usedMinutes += d.slotMinutes;
+        targetDay.remainingMinutes -= d.slotMinutes; // allowed to go negative
       }
-
-      if (day.remainingMinutes <= 0) break;
     }
   }
+
+  /* ============================================================
+     UNMET + NOTES
+     ============================================================ */
 
   const unmet = demands
     .filter((d) => d.remainingSlots > 0)
@@ -330,17 +344,12 @@ export function planRevisionSlots(
       remainingMinutes: d.remainingSlots * d.slotMinutes,
     }));
 
-  if (unmet.length > 0) {
-    notes.push(
-      "Not all revision demand could be scheduled within the window/capacity."
-    );
-  }
-
   const totalPlanned = days.reduce((s, d) => s + d.usedMinutes, 0);
   const totalDemand = demands.reduce((s, d) => s + d.totalMinutes, 0);
 
-  notes.push(`Planned ${totalPlanned} mins of revision across ${numDays} days.`);
-  notes.push(`Total computed revision demand: ${totalDemand} mins.`);
+  notes.push(`Planned ${totalPlanned} mins across ${numDays} days.`);
+  notes.push(`Total revision demand: ${totalDemand} mins.`);
 
   return { days, demands, unmet, notes };
 }
+

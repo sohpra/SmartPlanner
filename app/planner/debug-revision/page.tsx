@@ -65,7 +65,8 @@ export default function DebugRevisionPage() {
   }, [weekly.tasks, windowDates]);
 
   /* ============================================================
-     DEADLINE TASKS — LAP, once, before due date
+     DEADLINE TASKS — latest-first before due date (NO REPEAT)
+     (leaving as-is for now; we’ll revise strategy next)
      ============================================================ */
 
   const deadlineByDate = useMemo(() => {
@@ -84,6 +85,7 @@ export default function DebugRevisionPage() {
     for (const task of ordered) {
       let remaining = task.estimated_minutes;
 
+      // latest-first placement, never on due date
       for (let i = windowDates.length - 1; i >= 0; i--) {
         const d = windowDates[i];
         if (d >= task.due_date) continue;
@@ -102,16 +104,17 @@ export default function DebugRevisionPage() {
   }, [deadlines.tasks, windowDates, baseCapacity, weeklyByDate, today]);
 
   /* ============================================================
-     REVISION — SOFT CAPACITY (ALLOW OVERLOAD)
+     REVISION CAPACITY — REAL remaining capacity (NO HEADROOM)
+     This is the key fix: the engine must see real spare time,
+     otherwise it can "choose" to overload even when a prior day
+     had spare base capacity.
      ============================================================ */
 
   const revisionCapacity = useMemo(() => {
     const cap: Record<string, number> = {};
     for (const d of windowDates) {
-      cap[d] =
-        baseCapacity[d] -
-        weeklyByDate[d] -
-        deadlineByDate[d];
+      const remaining = baseCapacity[d] - weeklyByDate[d] - deadlineByDate[d];
+      cap[d] = Math.max(0, remaining);
     }
     return cap;
   }, [baseCapacity, weeklyByDate, deadlineByDate, windowDates]);
@@ -134,13 +137,18 @@ export default function DebugRevisionPage() {
       <h1 className="text-2xl font-semibold">🔍 Planner Debug</h1>
 
       {revisionPlan.days.map((day) => {
-        const base = baseCapacity[day.date];
-        const weeklyMins = weeklyByDate[day.date];
-        const deadlineMins = deadlineByDate[day.date];
+        const base = baseCapacity[day.date] ?? 0;
+        const weeklyMins = weeklyByDate[day.date] ?? 0;
+        const deadlineMins = deadlineByDate[day.date] ?? 0;
+
+        // Revision minutes scheduled by the engine for that day:
         const revisionMins = day.usedMinutes;
 
         const hardUsed = weeklyMins + deadlineMins;
         const totalUsed = hardUsed + revisionMins;
+
+        // If engine overload pass ever pushes remainingMinutes negative,
+        // this will show correctly (totalUsed > base).
         const overload = Math.max(0, totalUsed - base);
 
         return (
@@ -171,14 +179,12 @@ export default function DebugRevisionPage() {
 
             {day.slots.length > 0 && (
               <>
-                <div className="font-medium text-sm pt-2">
-                  Revision slots
-                </div>
+                <div className="font-medium text-sm pt-2">Revision slots</div>
                 <ul className="text-sm space-y-1">
                   {day.slots.map((s, i) => (
                     <li key={i}>
-                      • <strong>{s.subject}</strong> — {s.label} (
-                      {s.slotMinutes} mins)
+                      • <strong>{s.subject}</strong> — {s.label} ({s.slotMinutes}{" "}
+                      mins)
                     </li>
                   ))}
                 </ul>
@@ -190,9 +196,7 @@ export default function DebugRevisionPage() {
 
       {revisionPlan.unmet.length > 0 && (
         <div className="rounded-lg border bg-red-100 p-4">
-          <h2 className="font-medium mb-2">
-            ❗ Unmet revision demand (even after overload)
-          </h2>
+          <h2 className="font-medium mb-2">❗ Unmet revision demand</h2>
           <ul className="text-sm space-y-1">
             {revisionPlan.unmet.map((u) => (
               <li key={u.examId}>
