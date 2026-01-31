@@ -1,4 +1,4 @@
-import { addDays } from "@/lib/planner/revisionEngine";
+// src/lib/planner/projectAllocator.ts
 
 export type ProjectWeekPlan = {
   projectId: string;
@@ -17,8 +17,15 @@ export type ProjectDayAllocation = {
 export function allocateProjectsIntoDays(
   projects: ProjectWeekPlan[],
   windowDates: string[],
-  spareCapacityByDate: Record<string, number>
+  spareCapacityByDate: Record<string, number>,
+  opts?: {
+    minSlotMinutes?: number;
+    maxPerProjectPerDayMinutes?: number;
+  }
 ): Record<string, ProjectDayAllocation[]> {
+  const minSlot = opts?.minSlotMinutes ?? 30;
+  const maxPerDay = opts?.maxPerProjectPerDayMinutes ?? 120;
+
   const perDay: Record<string, ProjectDayAllocation[]> = {};
   for (const d of windowDates) perDay[d] = [];
 
@@ -32,10 +39,16 @@ export function allocateProjectsIntoDays(
       if (remaining <= 0) break;
       if (d > project.dueDate) break;
 
-      const cap = remainingCap[d];
-      if (cap <= 0) continue;
+      const cap = remainingCap[d] ?? 0;
+      if (cap < minSlot) continue;
 
-      const used = Math.min(cap, remaining);
+      const used = Math.min(
+        cap,
+        remaining,
+        maxPerDay
+      );
+
+      if (used < minSlot) continue;
 
       perDay[d].push({
         projectId: project.projectId,
