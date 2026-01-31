@@ -2,9 +2,9 @@
 
 import { useMemo } from "react";
 
-import { useExams } from "@/hooks/use-exams";
 import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
 import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
+import { useExams } from "@/hooks/use-exams";
 import { useProjects } from "@/hooks/use-projects";
 
 import {
@@ -19,7 +19,9 @@ import {
   type ProjectWeekPlan,
 } from "@/lib/planner/projectAllocator";
 
-/* ---------- helpers ---------- */
+/* ============================================================
+   Helpers
+   ============================================================ */
 
 function buildBaseCapacity(start: string, days: number) {
   const out: Record<string, number> = {};
@@ -31,19 +33,17 @@ function buildBaseCapacity(start: string, days: number) {
   return out;
 }
 
-function minsToHours(mins: number) {
-  return Math.round((mins / 60) * 4) / 4;
-}
-
-/* ---------- component ---------- */
+/* ============================================================
+   Component
+   ============================================================ */
 
 export default function DebugRevisionPage() {
   const today = toDateOnly(new Date().toISOString());
   const numDays = 7;
 
-  const exams = useExams();
   const weekly = useWeeklyTasks();
   const deadlines = useDeadlineTasks();
+  const exams = useExams();
   const projectsHook = useProjects();
 
   const windowDates = useMemo(
@@ -62,7 +62,7 @@ export default function DebugRevisionPage() {
 
   const weeklyByDate = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const d of windowDates) map[d] = 0;
+    windowDates.forEach((d) => (map[d] = 0));
 
     for (const task of weekly.tasks) {
       for (const d of windowDates) {
@@ -75,15 +75,18 @@ export default function DebugRevisionPage() {
     return map;
   }, [weekly.tasks, windowDates]);
 
-  const weeklyTasksByDate = useMemo(() => {
+  const weeklyItemsByDate = useMemo(() => {
     const map: Record<string, { name: string; minutes: number }[]> = {};
-    for (const d of windowDates) map[d] = [];
+    windowDates.forEach((d) => (map[d] = []));
 
     for (const task of weekly.tasks) {
       for (const d of windowDates) {
         const dow = new Date(d + "T00:00:00").getDay();
         if (dow === task.day_of_week) {
-          map[d].push({ name: task.name, minutes: task.duration_minutes });
+          map[d].push({
+            name: task.name,
+            minutes: task.duration_minutes,
+          });
         }
       }
     }
@@ -91,10 +94,10 @@ export default function DebugRevisionPage() {
   }, [weekly.tasks, windowDates]);
 
   /* ============================================================
-     HOMEWORK & ASSIGNMENTS — earliest-safe, no splitting if avoidable
+     HOMEWORK & ASSESSMENTS (Deadline tasks)
      ============================================================ */
 
-  const homeworkAllocations = useMemo(() => {
+  const homeworkByDate = useMemo(() => {
     const remainingCap: Record<string, number> = {};
     const perDay: Record<
       string,
@@ -114,7 +117,6 @@ export default function DebugRevisionPage() {
       let remaining = task.estimated_minutes;
       const candidates = windowDates.filter((d) => d < task.due_date);
 
-      // try single-day placement
       const oneDay = candidates.find((d) => remainingCap[d] >= remaining);
       if (oneDay) {
         perDay[oneDay].push({
@@ -126,7 +128,6 @@ export default function DebugRevisionPage() {
         continue;
       }
 
-      // otherwise split
       for (const d of candidates) {
         if (remaining <= 0) break;
         if (remainingCap[d] <= 0) continue;
@@ -145,13 +146,13 @@ export default function DebugRevisionPage() {
     return perDay;
   }, [deadlines.tasks, windowDates, baseCapacity, weeklyByDate, today]);
 
-  const homeworkByDate = useMemo(() => {
+  const homeworkMinutesByDate = useMemo(() => {
     const map: Record<string, number> = {};
     for (const d of windowDates) {
-      map[d] = homeworkAllocations[d].reduce((s, x) => s + x.minutes, 0);
+      map[d] = homeworkByDate[d].reduce((s, x) => s + x.minutes, 0);
     }
     return map;
-  }, [homeworkAllocations, windowDates]);
+  }, [homeworkByDate, windowDates]);
 
   /* ============================================================
      REVISION
@@ -162,11 +163,11 @@ export default function DebugRevisionPage() {
     for (const d of windowDates) {
       cap[d] = Math.max(
         0,
-        baseCapacity[d] - weeklyByDate[d] - homeworkByDate[d]
+        baseCapacity[d] - weeklyByDate[d] - homeworkMinutesByDate[d]
       );
     }
     return cap;
-  }, [baseCapacity, weeklyByDate, homeworkByDate, windowDates]);
+  }, [baseCapacity, weeklyByDate, homeworkMinutesByDate, windowDates]);
 
   const revisionPlan = useMemo(() => {
     return planRevisionSlots(exams.upcoming, {
@@ -178,41 +179,44 @@ export default function DebugRevisionPage() {
   }, [exams.upcoming, today, numDays, revisionCapacity]);
 
   /* ============================================================
-     PROJECTS — weekly demand → daily allocation
+     PROJECTS (READ-ONLY – already allocated elsewhere)
      ============================================================ */
 
-  const projectWeekPlans = useMemo<ProjectWeekPlan[]>(() => {
-    return (projectsHook.projects ?? [])
+  const projectWeekPlans: ProjectWeekPlan[] = useMemo(() => {
+    return projectsHook.projects
       .filter((p) => p.status === "active")
-      .map((p) => {
-        const remaining = Math.max(
+      .map((p) => ({
+        projectId: p.id,
+        name: p.name,
+        subject: p.subject,
+        dueDate: p.due_date,
+        weeklyRemainingMinutes: Math.max(
           0,
           p.estimated_minutes - p.completed_minutes
-        );
-
-        return {
-          projectId: p.id,
-          name: p.name,
-          subject: p.subject ?? null,
-          dueDate: p.due_date,
-          weeklyRemainingMinutes: Math.min(300, remaining), // 5h cap
-        };
-      });
+        ),
+      }));
   }, [projectsHook.projects]);
 
   const spareCapacityByDate = useMemo(() => {
-    const map: Record<string, number> = {};
+    const spare: Record<string, number> = {};
     for (const day of revisionPlan.days) {
-      const used =
-        (weeklyByDate[day.date] ?? 0) +
-        (homeworkByDate[day.date] ?? 0) +
-        day.usedMinutes;
-      map[day.date] = Math.max(0, (baseCapacity[day.date] ?? 0) - used);
+      spare[day.date] = Math.max(
+        0,
+        baseCapacity[day.date] -
+          weeklyByDate[day.date] -
+          homeworkMinutesByDate[day.date] -
+          day.usedMinutes
+      );
     }
-    return map;
-  }, [revisionPlan.days, weeklyByDate, homeworkByDate, baseCapacity]);
+    return spare;
+  }, [
+    revisionPlan.days,
+    baseCapacity,
+    weeklyByDate,
+    homeworkMinutesByDate,
+  ]);
 
-  const projectAllocationsByDate = useMemo(() => {
+  const projectByDate = useMemo(() => {
     return allocateProjectsIntoDays(
       projectWeekPlans,
       windowDates,
@@ -226,31 +230,21 @@ export default function DebugRevisionPage() {
 
   return (
     <div className="p-8 space-y-8">
-      <h1 className="text-2xl font-semibold">🔍 Planner Debug</h1>
-
-      {/* ===================== */}
-      {/* DAILY BREAKDOWN */}
-      {/* ===================== */}
+      <h1 className="text-3xl font-semibold">🔍 Planner Debug</h1>
 
       {revisionPlan.days.map((day) => {
-        const base = baseCapacity[day.date] ?? 0;
-        const weeklyMins = weeklyByDate[day.date] ?? 0;
-        const homeworkMins = homeworkByDate[day.date] ?? 0;
+        const base = baseCapacity[day.date];
+        const weeklyMins = weeklyByDate[day.date];
+        const homeworkMins = homeworkMinutesByDate[day.date];
         const revisionMins = day.usedMinutes;
         const projectMins =
-          projectAllocationsByDate[day.date]?.reduce(
-            (s, p) => s + p.minutes,
-            0
-          ) ?? 0;
+          projectByDate[day.date]?.reduce((s, x) => s + x.minutes, 0) ?? 0;
 
         const totalUsed =
           weeklyMins + homeworkMins + revisionMins + projectMins;
 
         return (
-          <div
-            key={day.date}
-            className="rounded-lg border bg-white p-4 space-y-3"
-          >
+          <div key={day.date} className="rounded-lg border p-4 space-y-3">
             <div className="flex justify-between">
               <h2 className="font-medium">{day.date}</h2>
               <div className="text-sm text-gray-600">
@@ -260,23 +254,52 @@ export default function DebugRevisionPage() {
 
             <ul className="text-sm space-y-1">
               <li>📌 Weekly: {weeklyMins}</li>
-              <li>📅 Homework & Assignments: {homeworkMins}</li>
+              <li>📅 Homework & Assessments: {homeworkMins}</li>
               <li>⏱ Revision: {revisionMins}</li>
               <li>🧩 Projects: {projectMins}</li>
             </ul>
 
-            <div className="pt-2 space-y-2 text-sm">
-              {projectAllocationsByDate[day.date]?.length > 0 && (
-                <>
-                  <div className="font-medium">Projects</div>
-                  {projectAllocationsByDate[day.date].map((p, i) => (
-                    <div key={i}>
-                      • {p.name}: {p.minutes} mins
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
+            {weeklyItemsByDate[day.date].length > 0 && (
+              <>
+                <div className="font-medium">Weekly</div>
+                {weeklyItemsByDate[day.date].map((t, i) => (
+                  <div key={i}>• {t.name}: {t.minutes} mins</div>
+                ))}
+              </>
+            )}
+
+            {homeworkByDate[day.date].length > 0 && (
+              <>
+                <div className="font-medium">Homework & Assessments</div>
+                {homeworkByDate[day.date].map((h, i) => (
+                  <div key={i}>
+                    • {h.name} (due {h.dueDate}): {h.minutes} mins
+                  </div>
+                ))}
+              </>
+            )}
+
+            {day.slots.length > 0 && (
+              <>
+                <div className="font-medium">Revision</div>
+                {day.slots.map((s, i) => (
+                  <div key={i}>
+                    • {s.subject} — {s.label} ({s.slotMinutes} mins)
+                  </div>
+                ))}
+              </>
+            )}
+
+            {projectByDate[day.date]?.length > 0 && (
+              <>
+                <div className="font-medium">Projects</div>
+                {projectByDate[day.date].map((p, i) => (
+                  <div key={i}>
+                    • {p.name}: {p.minutes} mins
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         );
       })}
