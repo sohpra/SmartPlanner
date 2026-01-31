@@ -69,26 +69,30 @@ export default function DebugRevisionPage() {
      (leaving as-is for now; we’ll revise strategy next)
      ============================================================ */
 
-  const deadlineByDate = useMemo(() => {
+  /* ============================================================
+   DEADLINE TASKS — EARLIEST SAFE PLACEMENT (ONCE)
+   ============================================================ */
+
+    const deadlineByDate = useMemo(() => {
     const remainingCap: Record<string, number> = {};
     const map: Record<string, number> = {};
 
     for (const d of windowDates) {
-      remainingCap[d] = baseCapacity[d] - weeklyByDate[d];
-      map[d] = 0;
+        remainingCap[d] = baseCapacity[d] - weeklyByDate[d];
+        map[d] = 0;
     }
 
+    // Sort by due date (earliest first)
     const ordered = [...deadlines.tasks].sort(
-      (a, b) => daysBetween(today, a.due_date) - daysBetween(today, b.due_date)
+        (a, b) => daysBetween(today, a.due_date) - daysBetween(today, b.due_date)
     );
 
     for (const task of ordered) {
-      let remaining = task.estimated_minutes;
+        let remaining = task.estimated_minutes;
 
-      // latest-first placement, never on due date
-      for (let i = windowDates.length - 1; i >= 0; i--) {
-        const d = windowDates[i];
-        if (d >= task.due_date) continue;
+        // EARLIEST-FIRST placement (never on due date)
+        for (const d of windowDates) {
+        if (d >= task.due_date) break;
         if (remainingCap[d] <= 0) continue;
 
         const used = Math.min(remainingCap[d], remaining);
@@ -97,11 +101,14 @@ export default function DebugRevisionPage() {
         remaining -= used;
 
         if (remaining <= 0) break;
-      }
+        }
+
+        // If remaining > 0, we intentionally leave it unmet for now
+        // (future iteration: deadline overload / warning)
     }
 
     return map;
-  }, [deadlines.tasks, windowDates, baseCapacity, weeklyByDate, today]);
+    }, [deadlines.tasks, windowDates, baseCapacity, weeklyByDate, today]);
 
   /* ============================================================
      REVISION CAPACITY — REAL remaining capacity (NO HEADROOM)
