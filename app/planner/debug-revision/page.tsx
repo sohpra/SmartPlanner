@@ -50,29 +50,47 @@ export default function DebugRevisionPage() {
      ============================================================ */
 
   const weeklyByDate = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const d of windowDates) map[d] = 0;
+    const out: Record<string, number> = {};
+    for (const d of windowDates) out[d] = 0;
 
     for (const task of weekly.tasks) {
       for (const d of windowDates) {
         const dow = new Date(d + "T00:00:00").getDay();
         if (dow === task.day_of_week) {
-          map[d] += task.duration_minutes;
+          out[d] += task.duration_minutes;
         }
       }
     }
-    return map;
+    return out;
+  }, [weekly.tasks, windowDates]);
+
+  const weeklyTasksByDate = useMemo(() => {
+    const out: Record<string, { name: string; minutes: number }[]> = {};
+    for (const d of windowDates) out[d] = [];
+
+    for (const task of weekly.tasks) {
+      for (const d of windowDates) {
+        const dow = new Date(d + "T00:00:00").getDay();
+        if (dow === task.day_of_week) {
+          out[d].push({
+            name: task.name,
+            minutes: task.duration_minutes,
+          });
+        }
+      }
+    }
+    return out;
   }, [weekly.tasks, windowDates]);
 
   /* ============================================================
-     DEADLINE TASKS — EARLIEST SAFE PLACEMENT (PER-TASK TRACKING)
+     HOMEWORK & ASSIGNMENTS — ATOMIC FIRST
      ============================================================ */
 
-  const deadlineAllocations = useMemo(() => {
+  const homeworkAllocations = useMemo(() => {
     const remainingCap: Record<string, number> = {};
     const perDay: Record<
       string,
-      { taskId: string; name: string; minutes: number }[]
+      { name: string; dueDate: string; minutes: number }[]
     > = {};
 
     for (const d of windowDates) {
@@ -85,7 +103,25 @@ export default function DebugRevisionPage() {
     );
 
     for (const task of ordered) {
-      let remaining = task.estimated_minutes;
+      const total = task.estimated_minutes;
+
+      // ✅ 1. Try atomic placement first
+      const atomicDay = windowDates.find(
+        (d) => d < task.due_date && remainingCap[d] >= total
+      );
+
+      if (atomicDay) {
+        perDay[atomicDay].push({
+          name: task.name,
+          dueDate: task.due_date,
+          minutes: total,
+        });
+        remainingCap[atomicDay] -= total;
+        continue;
+      }
+
+      // 🔁 2. Fallback: split only if unavoidable
+      let remaining = total;
 
       for (const d of windowDates) {
         if (d >= task.due_date) break;
@@ -94,8 +130,8 @@ export default function DebugRevisionPage() {
         const used = Math.min(remainingCap[d], remaining);
 
         perDay[d].push({
-          taskId: task.id,
           name: task.name,
+          dueDate: task.due_date,
           minutes: used,
         });
 
@@ -109,16 +145,19 @@ export default function DebugRevisionPage() {
     return perDay;
   }, [deadlines.tasks, windowDates, baseCapacity, weeklyByDate, today]);
 
-  const deadlineByDate = useMemo(() => {
-    const map: Record<string, number> = {};
+  const homeworkByDate = useMemo(() => {
+    const out: Record<string, number> = {};
     for (const d of windowDates) {
-      map[d] = deadlineAllocations[d].reduce((s, x) => s + x.minutes, 0);
+      out[d] = homeworkAllocations[d].reduce(
+        (s, x) => s + x.minutes,
+        0
+      );
     }
-    return map;
-  }, [deadlineAllocations, windowDates]);
+    return out;
+  }, [homeworkAllocations, windowDates]);
 
   /* ============================================================
-     REVISION CAPACITY (REAL)
+     REVISION CAPACITY
      ============================================================ */
 
   const revisionCapacity = useMemo(() => {
@@ -126,11 +165,11 @@ export default function DebugRevisionPage() {
     for (const d of windowDates) {
       cap[d] = Math.max(
         0,
-        baseCapacity[d] - weeklyByDate[d] - deadlineByDate[d]
+        baseCapacity[d] - weeklyByDate[d] - homeworkByDate[d]
       );
     }
     return cap;
-  }, [baseCapacity, weeklyByDate, deadlineByDate, windowDates]);
+  }, [baseCapacity, weeklyByDate, homeworkByDate, windowDates]);
 
   const revisionPlan = useMemo(() => {
     return planRevisionSlots(exams.upcoming, {
@@ -152,10 +191,10 @@ export default function DebugRevisionPage() {
       {revisionPlan.days.map((day) => {
         const base = baseCapacity[day.date] ?? 0;
         const weeklyMins = weeklyByDate[day.date] ?? 0;
-        const deadlineMins = deadlineByDate[day.date] ?? 0;
+        const homeworkMins = homeworkByDate[day.date] ?? 0;
         const revisionMins = day.usedMinutes;
 
-        const totalUsed = weeklyMins + deadlineMins + revisionMins;
+        const totalUsed = weeklyMins + homeworkMins + revisionMins;
         const overload = Math.max(0, totalUsed - base);
 
         return (
@@ -180,22 +219,31 @@ export default function DebugRevisionPage() {
             <ul className="text-sm space-y-1">
               <li>🟦 Base: {base}</li>
               <li>📌 Weekly: {weeklyMins}</li>
-              <li>📅 Deadlines: {deadlineMins}</li>
+              <li>📅 Homework & Assignments: {homeworkMins}</li>
               <li>⏱ Revision: {revisionMins}</li>
             </ul>
 
-            <div className="pt-2 space-y-1 text-sm">
-              {weeklyMins > 0 && <div className="font-medium">Weekly</div>}
-              {deadlineAllocations[day.date].length > 0 && (
+            <div className="pt-2 space-y-2 text-sm">
+              {weeklyTasksByDate[day.date].length > 0 && (
                 <>
-                  <div className="font-medium">Deadline</div>
-                  {deadlineAllocations[day.date].map((d, i) => (
+                  <div className="font-medium">Weekly</div>
+                  {weeklyTasksByDate[day.date].map((t, i) => (
+                    <div key={i}>• {t.name}: {t.minutes} mins</div>
+                  ))}
+                </>
+              )}
+
+              {homeworkAllocations[day.date].length > 0 && (
+                <>
+                  <div className="font-medium">Homework & Assignments</div>
+                  {homeworkAllocations[day.date].map((h, i) => (
                     <div key={i}>
-                      • {d.name}: {d.minutes} mins
+                      • {h.name} (due {h.dueDate}): {h.minutes} mins
                     </div>
                   ))}
                 </>
               )}
+
               {day.slots.length > 0 && (
                 <>
                   <div className="font-medium">Revision</div>
