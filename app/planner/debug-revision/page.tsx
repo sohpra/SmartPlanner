@@ -46,7 +46,7 @@ export default function DebugRevisionPage() {
   );
 
   /* ============================================================
-     WEEKLY TASKS (fixed)
+     WEEKLY TASKS
      ============================================================ */
 
   const weeklyByDate = useMemo(() => {
@@ -65,63 +65,69 @@ export default function DebugRevisionPage() {
   }, [weekly.tasks, windowDates]);
 
   /* ============================================================
-     DEADLINE TASKS — latest-first before due date (NO REPEAT)
-     (leaving as-is for now; we’ll revise strategy next)
+     DEADLINE TASKS — EARLIEST SAFE PLACEMENT (PER-TASK TRACKING)
      ============================================================ */
 
-  /* ============================================================
-   DEADLINE TASKS — EARLIEST SAFE PLACEMENT (ONCE)
-   ============================================================ */
-
-    const deadlineByDate = useMemo(() => {
+  const deadlineAllocations = useMemo(() => {
     const remainingCap: Record<string, number> = {};
-    const map: Record<string, number> = {};
+    const perDay: Record<
+      string,
+      { taskId: string; name: string; minutes: number }[]
+    > = {};
 
     for (const d of windowDates) {
-        remainingCap[d] = baseCapacity[d] - weeklyByDate[d];
-        map[d] = 0;
+      remainingCap[d] = baseCapacity[d] - weeklyByDate[d];
+      perDay[d] = [];
     }
 
-    // Sort by due date (earliest first)
     const ordered = [...deadlines.tasks].sort(
-        (a, b) => daysBetween(today, a.due_date) - daysBetween(today, b.due_date)
+      (a, b) => daysBetween(today, a.due_date) - daysBetween(today, b.due_date)
     );
 
     for (const task of ordered) {
-        let remaining = task.estimated_minutes;
+      let remaining = task.estimated_minutes;
 
-        // EARLIEST-FIRST placement (never on due date)
-        for (const d of windowDates) {
+      for (const d of windowDates) {
         if (d >= task.due_date) break;
         if (remainingCap[d] <= 0) continue;
 
         const used = Math.min(remainingCap[d], remaining);
-        map[d] += used;
+
+        perDay[d].push({
+          taskId: task.id,
+          name: task.name,
+          minutes: used,
+        });
+
         remainingCap[d] -= used;
         remaining -= used;
 
         if (remaining <= 0) break;
-        }
-
-        // If remaining > 0, we intentionally leave it unmet for now
-        // (future iteration: deadline overload / warning)
+      }
     }
 
+    return perDay;
+  }, [deadlines.tasks, windowDates, baseCapacity, weeklyByDate, today]);
+
+  const deadlineByDate = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const d of windowDates) {
+      map[d] = deadlineAllocations[d].reduce((s, x) => s + x.minutes, 0);
+    }
     return map;
-    }, [deadlines.tasks, windowDates, baseCapacity, weeklyByDate, today]);
+  }, [deadlineAllocations, windowDates]);
 
   /* ============================================================
-     REVISION CAPACITY — REAL remaining capacity (NO HEADROOM)
-     This is the key fix: the engine must see real spare time,
-     otherwise it can "choose" to overload even when a prior day
-     had spare base capacity.
+     REVISION CAPACITY (REAL)
      ============================================================ */
 
   const revisionCapacity = useMemo(() => {
     const cap: Record<string, number> = {};
     for (const d of windowDates) {
-      const remaining = baseCapacity[d] - weeklyByDate[d] - deadlineByDate[d];
-      cap[d] = Math.max(0, remaining);
+      cap[d] = Math.max(
+        0,
+        baseCapacity[d] - weeklyByDate[d] - deadlineByDate[d]
+      );
     }
     return cap;
   }, [baseCapacity, weeklyByDate, deadlineByDate, windowDates]);
@@ -147,15 +153,9 @@ export default function DebugRevisionPage() {
         const base = baseCapacity[day.date] ?? 0;
         const weeklyMins = weeklyByDate[day.date] ?? 0;
         const deadlineMins = deadlineByDate[day.date] ?? 0;
-
-        // Revision minutes scheduled by the engine for that day:
         const revisionMins = day.usedMinutes;
 
-        const hardUsed = weeklyMins + deadlineMins;
-        const totalUsed = hardUsed + revisionMins;
-
-        // If engine overload pass ever pushes remainingMinutes negative,
-        // this will show correctly (totalUsed > base).
+        const totalUsed = weeklyMins + deadlineMins + revisionMins;
         const overload = Math.max(0, totalUsed - base);
 
         return (
@@ -184,35 +184,32 @@ export default function DebugRevisionPage() {
               <li>⏱ Revision: {revisionMins}</li>
             </ul>
 
-            {day.slots.length > 0 && (
-              <>
-                <div className="font-medium text-sm pt-2">Revision slots</div>
-                <ul className="text-sm space-y-1">
-                  {day.slots.map((s, i) => (
-                    <li key={i}>
-                      • <strong>{s.subject}</strong> — {s.label} ({s.slotMinutes}{" "}
-                      mins)
-                    </li>
+            <div className="pt-2 space-y-1 text-sm">
+              {weeklyMins > 0 && <div className="font-medium">Weekly</div>}
+              {deadlineAllocations[day.date].length > 0 && (
+                <>
+                  <div className="font-medium">Deadline</div>
+                  {deadlineAllocations[day.date].map((d, i) => (
+                    <div key={i}>
+                      • {d.name}: {d.minutes} mins
+                    </div>
                   ))}
-                </ul>
-              </>
-            )}
+                </>
+              )}
+              {day.slots.length > 0 && (
+                <>
+                  <div className="font-medium">Revision</div>
+                  {day.slots.map((s, i) => (
+                    <div key={i}>
+                      • {s.subject} — {s.label} ({s.slotMinutes} mins)
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
           </div>
         );
       })}
-
-      {revisionPlan.unmet.length > 0 && (
-        <div className="rounded-lg border bg-red-100 p-4">
-          <h2 className="font-medium mb-2">❗ Unmet revision demand</h2>
-          <ul className="text-sm space-y-1">
-            {revisionPlan.unmet.map((u) => (
-              <li key={u.examId}>
-                • <strong>{u.subject}</strong> — {u.remainingMinutes} mins
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
