@@ -3,6 +3,10 @@
 import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
 import { useProjects } from "@/hooks/use-projects";
 import { useDailyCompletions } from "@/hooks/use-daily-completions";
+import {
+  useDeadlineTasks,
+  type DeadlineTask,
+} from "@/hooks/use-deadline-tasks";
 
 export type RevisionSlot = {
   examId: string;
@@ -13,24 +17,27 @@ export type RevisionSlot = {
 
 type Props = {
   date: Date;
-  revisionSlots?: RevisionSlot[]; // ✅ THIS is what TS was missing
+  revisionSlots?: RevisionSlot[];
 };
 
-export function DailyChecklist({
-  date,
-  revisionSlots = [],
-}: Props) {
+export function DailyChecklist({ date, revisionSlots = [] }: Props) {
   const dayIndex = date.getDay();
   const { completed, toggle } = useDailyCompletions(date);
 
   const { tasks: weeklyTasks, isLoading: weeklyLoading } = useWeeklyTasks();
   const { projects, isLoading: projectsLoading } = useProjects();
 
+  // ✅ Homework & assignments (deadline tasks)
+  const {
+    tasks: deadlineTasks,
+    isLoading: deadlineLoading,
+  } = useDeadlineTasks();
+
   const todaysWeeklyTasks = weeklyTasks.filter(
     (t) => t.day_of_week === dayIndex
   );
 
-  if (weeklyLoading || projectsLoading) {
+  if (weeklyLoading || projectsLoading || deadlineLoading) {
     return <div className="p-4">Loading checklist…</div>;
   }
 
@@ -42,9 +49,7 @@ export function DailyChecklist({
       {/* WEEKLY TASKS */}
       {/* ===================== */}
       <section>
-        <h3 className="mb-2 text-sm font-medium text-gray-500">
-          Weekly tasks
-        </h3>
+        <h3 className="mb-2 text-sm font-medium text-gray-500">Weekly tasks</h3>
 
         {todaysWeeklyTasks.length === 0 ? (
           <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
@@ -77,12 +82,50 @@ export function DailyChecklist({
       </section>
 
       {/* ===================== */}
-      {/* PROJECTS */}
+      {/* HOMEWORK & ASSIGNMENTS */}
       {/* ===================== */}
       <section>
         <h3 className="mb-2 text-sm font-medium text-gray-500">
-          Projects
+          Homework & assignments
         </h3>
+
+        {deadlineTasks.length === 0 ? (
+          <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
+            No homework due.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {deadlineTasks.map((task: DeadlineTask) => (
+              <div
+                key={task.id}
+                className="flex items-center justify-between rounded-lg border bg-white p-3"
+              >
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={completed.has(`deadline_task:${task.id}`)}
+                    onChange={() => toggle("deadline_task", task.id)}
+                  />
+
+                  <span className="text-sm">
+                    <strong>{task.name}</strong> · {task.estimated_minutes} mins
+                  </span>
+                </div>
+
+                <span className="text-xs text-gray-400">
+                  Due {task.due_date}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ===================== */}
+      {/* PROJECTS */}
+      {/* ===================== */}
+      <section>
+        <h3 className="mb-2 text-sm font-medium text-gray-500">Projects</h3>
 
         {projects.length === 0 ? (
           <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
@@ -121,9 +164,7 @@ export function DailyChecklist({
       {/* REVISION */}
       {/* ===================== */}
       <section>
-        <h3 className="mb-2 text-sm font-medium text-gray-500">
-          Revision
-        </h3>
+        <h3 className="mb-2 text-sm font-medium text-gray-500">Revision</h3>
 
         {revisionSlots.length === 0 ? (
           <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">

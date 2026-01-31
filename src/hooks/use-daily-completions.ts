@@ -9,32 +9,59 @@ export function useDailyCompletions(date: Date) {
 
   useEffect(() => {
     const fetch = async () => {
-      const { data } = await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from("daily_completions")
         .select("source_type, source_id")
         .eq("date", dateKey);
 
-      if (data) {
-        setCompleted(
-          new Set(data.map((d) => `${d.source_type}:${d.source_id}`))
-        );
+      if (error) {
+        console.error("Failed to fetch completions", error);
+        return;
       }
+
+      setCompleted(
+        new Set(data.map((d) => `${d.source_type}:${d.source_id}`))
+      );
     };
 
     fetch();
   }, [dateKey]);
 
   async function toggle(source_type: string, source_id: string) {
+    if (!source_id) {
+      console.warn("toggle called with empty source_id");
+      return;
+    }
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      console.error("No authenticated user", userError);
+      return;
+    }
+
     const key = `${source_type}:${source_id}`;
     const exists = completed.has(key);
 
     if (exists) {
-      await supabase
+      const { error } = await supabase
         .from("daily_completions")
         .delete()
+        .eq("user_id", user.id)
         .eq("source_type", source_type)
         .eq("source_id", source_id)
         .eq("date", dateKey);
+
+      if (error) {
+        console.error("Failed to delete completion", error);
+        return;
+      }
 
       setCompleted((prev) => {
         const next = new Set(prev);
@@ -42,11 +69,19 @@ export function useDailyCompletions(date: Date) {
         return next;
       });
     } else {
-      await supabase.from("daily_completions").insert({
-        source_type,
-        source_id,
-        date: dateKey,
-      });
+      const { error } = await supabase
+        .from("daily_completions")
+        .insert({
+          user_id: user.id,          // 🔥 THIS WAS MISSING
+          source_type,
+          source_id,
+          date: dateKey,
+        });
+
+      if (error) {
+        console.error("Failed to insert completion", error);
+        return;
+      }
 
       setCompleted((prev) => new Set(prev).add(key));
     }
