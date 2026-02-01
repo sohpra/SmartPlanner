@@ -12,10 +12,6 @@ import { useExams } from "@/hooks/use-exams";
 
 import type { DayPlan } from "@/lib/planner/buildWeekPlan";
 
-/* ================================
-   Helpers
-================================ */
-
 function daysUntil(dateStr: string) {
   const today = new Date();
   const target = new Date(dateStr);
@@ -24,58 +20,33 @@ function daysUntil(dateStr: string) {
   );
 }
 
-/* ================================
-   Page
-================================ */
-
 export default function PlannerPage() {
   const { weekPlan, snapshotStart, refresh, isLoading } = useWeekPlan();
   const exams = useExams();
 
-  /**
-   * 🔒 IMPORTANT:
-   * Hooks must be called unconditionally.
-   * We use a fallback date until weekPlan is ready.
-   */
+  // Hooks must be called unconditionally.
   const safeTodayDate = weekPlan
     ? new Date(weekPlan.days[0].date + "T00:00:00")
     : new Date();
 
-  const { completed } = useDailyCompletions(safeTodayDate);
-
-  /* ================================
-     LOADING STATE
-  ================================ */
+  // ✅ SINGLE source of truth for completions (for "today")
+  const dailyCompletions = useDailyCompletions(safeTodayDate);
+  const { completed } = dailyCompletions;
 
   if (isLoading || !weekPlan) {
-    return (
-      <div className="p-6 text-sm text-gray-500">
-        Loading planner…
-      </div>
-    );
+    return <div className="p-6 text-sm text-gray-500">Loading planner…</div>;
   }
-
-  /* ================================
-     DAY PLANS
-  ================================ */
 
   const todayPlan: DayPlan = weekPlan.days[0];
   const tomorrowPlan: DayPlan | undefined = weekPlan.days[1];
-
-  /* ================================
-     METRICS (PLAN-BASED)
-  ================================ */
 
   const completionKeys: string[] = [
     ...todayPlan.homework.items.map((t) => `deadline_task:${t.id}`),
     ...todayPlan.weekly.items.map((t) => `weekly_task:${t.id}`),
     ...todayPlan.projects.items.map((p) => `project:${p.projectId}`),
-    // Revision intentionally excluded until enabled
   ];
 
-  const tasksCompleted = completionKeys.filter((k) =>
-    completed.has(k)
-  ).length;
+  const tasksCompleted = completionKeys.filter((k) => completed.has(k)).length;
 
   const totalTasks =
     todayPlan.homework.items.length +
@@ -89,26 +60,19 @@ export default function PlannerPage() {
     todayPlan.revision.minutes +
     todayPlan.projects.minutes;
 
-  const minutesCompleted = 0; // future enhancement
+  const minutesCompleted = 0;
 
-  const isOverCapacity =
-    todayPlan.totalUsed > todayPlan.baseCapacity;
+  const isOverCapacity = todayPlan.totalUsed > todayPlan.baseCapacity;
 
   const nextExam = exams.upcoming[0];
   const nextExamLabel = nextExam
     ? `${nextExam.subject} in ${daysUntil(nextExam.date)} days`
     : undefined;
 
-  /* ================================
-     RENDER
-  ================================ */
-
   return (
     <>
-      {/* HEADER + REFRESH */}
       <div className="flex items-center justify-between mb-4">
         <DashboardHeader />
-
         <button
           onClick={refresh}
           className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
@@ -117,13 +81,8 @@ export default function PlannerPage() {
         </button>
       </div>
 
-      {/* SNAPSHOT INFO */}
       <div className="mb-4 text-sm text-gray-500">
-        Plan snapshot:{" "}
-        <span className="font-medium">
-          {snapshotStart}
-        </span>
-
+        Plan snapshot: <span className="font-medium">{snapshotStart}</span>
         {isOverCapacity && (
           <span className="ml-3 font-semibold text-red-600">
             ⚠ Over capacity today
@@ -131,7 +90,6 @@ export default function PlannerPage() {
         )}
       </div>
 
-      {/* METRICS */}
       <DashboardMetrics
         tasksCompleted={tasksCompleted}
         totalTasks={totalTasks}
@@ -141,20 +99,16 @@ export default function PlannerPage() {
         nextExamLabel={nextExamLabel}
       />
 
-      {/* MAIN CONTENT */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* LEFT */}
         <div className="lg:col-span-2">
           <section className="rounded-xl border bg-white p-6">
-            <DailyChecklist day={todayPlan} />
+            {/* ✅ MUST pass completions */}
+            <DailyChecklist day={todayPlan} completions={dailyCompletions} />
           </section>
         </div>
 
-        {/* RIGHT */}
         <div className="space-y-6">
-          {tomorrowPlan && (
-            <TomorrowChecklist day={tomorrowPlan} />
-          )}
+          {tomorrowPlan && <TomorrowChecklist day={tomorrowPlan} />}
           <ComingUp />
         </div>
       </div>

@@ -49,31 +49,35 @@ export function TomorrowChecklist({ day }: Props) {
         </div>
       )}
 
-      {day.weekly.items.map((t) => (
+      {/* WEEKLY */}
+      {day.weekly.items.map((t, i) => (
         <Item
-          key={`weekly-${t.id}`}
+          key={`weekly:${t.id}:${day.date}:${i}`}
           label={`${t.name} · ${t.minutes} mins`}
         />
       ))}
 
-      {day.homework.items.map((t) => (
+      {/* HOMEWORK */}
+      {day.homework.items.map((t, i) => (
         <Item
-          key={`hw-${t.id}`}
+          key={`deadline:${t.id}:${day.date}:${i}`}
           label={`${t.name} · ${t.minutes} mins`}
           meta={`Due ${formatDate(t.dueDate)}`}
         />
       ))}
 
-      {day.projects.items.map((p) => (
+      {/* PROJECTS */}
+      {day.projects.items.map((p, i) => (
         <Item
-          key={`project-${p.projectId}`}
+          key={`project:${p.projectId}:${day.date}:${i}`}
           label={`${p.name} · ${p.minutes} mins`}
         />
       ))}
 
+      {/* REVISION */}
       {day.revision.slots.map((s, i) => (
         <Item
-          key={`rev-${s.examId}-${i}`}
+          key={`revision:${s.examId}:${day.date}:${i}`}
           label={`${s.label} · ${s.slotMinutes} mins`}
         />
       ))}

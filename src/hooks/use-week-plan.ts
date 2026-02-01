@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
 import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
@@ -8,14 +8,6 @@ import { useExams } from "@/hooks/use-exams";
 import { useProjects } from "@/hooks/use-projects";
 
 import { buildWeekPlan, type WeekPlan } from "@/lib/planner/buildWeekPlan";
-
-/**
- * IMPORTANT:
- * - This hook creates a SNAPSHOT of planner inputs.
- * - The plan does NOT refresh automatically when DB data changes.
- * - The plan refreshes ONLY when `refresh()` is called.
- * - The view (today/tomorrow) can roll forward at midnight without regenerating the plan.
- */
 
 function localDateKey(d: Date) {
   const y = d.getFullYear();
@@ -61,6 +53,30 @@ type SnapshotInputs = {
   }[];
 };
 
+function storageKey(numDays: number) {
+  return `smartplanner_weekplan_snapshot_v1_${numDays}`;
+}
+
+function safeParseSnapshot(raw: string | null): SnapshotInputs | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as SnapshotInputs;
+
+    // Minimal validation to avoid bricking the app on bad storage.
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.today !== "string") return null;
+    if (typeof parsed.numDays !== "number") return null;
+    if (!Array.isArray(parsed.weeklyTasks)) return null;
+    if (!Array.isArray(parsed.deadlines)) return null;
+    if (!Array.isArray(parsed.exams)) return null;
+    if (!Array.isArray(parsed.projects)) return null;
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export function useWeekPlan(numDays = 7): {
   weekPlan: WeekPlan | null;
   snapshotStart: string | null;
@@ -78,35 +94,74 @@ export function useWeekPlan(numDays = 7): {
     exams.loading ||
     projects.isLoading;
 
-
   const [snapshot, setSnapshot] = useState<SnapshotInputs | null>(null);
 
-  // Initial snapshot: take it ONCE when everything is loaded.
+  // 🔒 Survives within a mount; sessionStorage survives remounts.
+  const hasInitialised = useRef(false);
+
+  // 1) On mount, try to restore snapshot from sessionStorage.
   useEffect(() => {
+    if (hasInitialised.current) return;
+
+    const restored =
+      typeof window !== "undefined"
+        ? safeParseSnapshot(sessionStorage.getItem(storageKey(numDays)))
+        : null;
+
+    if (restored) {
+      hasInitialised.current = true;
+      setSnapshot(restored);
+    }
+  }, [numDays]);
+
+  // 2) If no restored snapshot, take the initial snapshot ONCE when loaded.
+  useEffect(() => {
+    if (hasInitialised.current) return;
     if (snapshot) return;
     if (isLoading) return;
 
-    setSnapshot({
+    const initial: SnapshotInputs = {
       today: localDateKey(new Date()),
       numDays,
       weeklyTasks: weekly.tasks,
       deadlines: deadlines.tasks,
       exams: exams.upcoming,
       projects: projects.projects,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading]);
+    };
 
+    hasInitialised.current = true;
+    setSnapshot(initial);
+
+    // Persist it so a remount (e.g. router.refresh) does NOT auto-resnapshot.
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(storageKey(numDays), JSON.stringify(initial));
+    }
+  }, [
+    isLoading,
+    snapshot,
+    numDays,
+    weekly.tasks,
+    deadlines.tasks,
+    exams.upcoming,
+    projects.projects,
+  ]);
+
+  // 3) Explicit refresh: overwrite snapshot + persist.
   const refresh = useCallback(() => {
-    // Explicit re-plan: capture current DB state.
-    setSnapshot({
+    const next: SnapshotInputs = {
       today: localDateKey(new Date()),
       numDays,
       weeklyTasks: weekly.tasks,
       deadlines: deadlines.tasks,
       exams: exams.upcoming,
       projects: projects.projects,
-    });
+    };
+
+    setSnapshot(next);
+
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(storageKey(numDays), JSON.stringify(next));
+    }
   }, [numDays, weekly.tasks, deadlines.tasks, exams.upcoming, projects.projects]);
 
   const weekPlan = useMemo(() => {

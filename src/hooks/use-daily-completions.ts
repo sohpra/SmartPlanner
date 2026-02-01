@@ -1,24 +1,44 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase/client";
 
 export function useDailyCompletions(date: Date) {
   const [completed, setCompleted] = useState<Set<string>>(new Set());
+  const [userId, setUserId] = useState<string | null>(null);
+
   const dateKey = date.toISOString().slice(0, 10);
 
+  /* ================================
+     Resolve auth ONCE
+     ================================ */
+
   useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUserId(data.user?.id ?? null);
+    });
+  }, []);
+
+  /* ================================
+     Fetch completions for date
+     ================================ */
+
+  useEffect(() => {
+    if (!userId) {
+      setCompleted(new Set());
+      return;
+    }
+
     const fetch = async () => {
-      const {
-        data,
-        error,
-      } = await supabase
+      const { data, error } = await supabase
         .from("daily_completions")
         .select("source_type, source_id")
+        .eq("user_id", userId)
         .eq("date", dateKey);
 
       if (error) {
         console.error("Failed to fetch completions", error);
+        setCompleted(new Set());
         return;
       }
 
@@ -28,64 +48,57 @@ export function useDailyCompletions(date: Date) {
     };
 
     fetch();
-  }, [dateKey]);
+  }, [userId, dateKey]);
 
-  async function toggle(source_type: string, source_id: string) {
-    if (!source_id) {
-      console.warn("toggle called with empty source_id");
-      return;
-    }
+  /* ================================
+     Toggle (optimistic)
+     ================================ */
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+  const toggle = useCallback(
+    async (source_type: string, source_id: string) => {
+      if (!userId || !source_id) return;
 
-    if (userError || !user) {
-      console.error("No authenticated user", userError);
-      return;
-    }
-
-    const key = `${source_type}:${source_id}`;
-    const exists = completed.has(key);
-
-    if (exists) {
-      const { error } = await supabase
-        .from("daily_completions")
-        .delete()
-        .eq("user_id", user.id)
-        .eq("source_type", source_type)
-        .eq("source_id", source_id)
-        .eq("date", dateKey);
-
-      if (error) {
-        console.error("Failed to delete completion", error);
-        return;
-      }
-
+      const key = `${source_type}:${source_id}`;
+      const exists = completed.has(key);
+        console.log("TOGGLE CALLED", source_type, source_id);
+      // ✅ optimistic update
       setCompleted((prev) => {
         const next = new Set(prev);
-        next.delete(key);
+        exists ? next.delete(key) : next.add(key);
         return next;
       });
-    } else {
-      const { error } = await supabase
-        .from("daily_completions")
-        .insert({
-          user_id: user.id,          // 🔥 THIS WAS MISSING
-          source_type,
-          source_id,
-          date: dateKey,
-        });
+      
 
-      if (error) {
-        console.error("Failed to insert completion", error);
-        return;
+      // 🔁 persist in background
+      if (exists) {
+        const { error } = await supabase
+          .from("daily_completions")
+          .delete()
+          .eq("user_id", userId)
+          .eq("source_type", source_type)
+          .eq("source_id", source_id)
+          .eq("date", dateKey);
+
+        if (error) {
+          console.error("Failed to delete completion", error);
+        }
+      } else {
+        const { error } = await supabase
+          .from("daily_completions")
+          .insert({
+            user_id: userId,
+            source_type,
+            source_id,
+            date: dateKey,
+          });
+
+        if (error) {
+          console.error("Failed to insert completion", error);
+        }
       }
+    },
+    [completed, userId, dateKey]
+  );
 
-      setCompleted((prev) => new Set(prev).add(key));
-    }
-  }
-
-  return { completed, toggle };
+  return { completed, toggle, userId };
 }

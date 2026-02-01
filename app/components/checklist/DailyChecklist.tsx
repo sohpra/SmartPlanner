@@ -2,11 +2,6 @@
 
 import React from "react";
 import type { DayPlan } from "@/lib/planner/buildWeekPlan";
-import { useDailyCompletions } from "@/hooks/use-daily-completions";
-
-/* ================================
-   Helpers
-================================ */
 
 function formatDate(date: string) {
   const d = new Date(date + "T00:00:00");
@@ -16,31 +11,28 @@ function formatDate(date: string) {
   return `${dow} ${day}/${month}`;
 }
 
-/* ================================
-   Types
-================================ */
-
 export type DailyChecklistProps = {
   day: DayPlan;
+  completions: {
+    completed: Set<string>;
+    toggle: (source_type: string, source_id: string) => Promise<void>;
+  };
 };
 
-/* ================================
-   Component
-================================ */
-export default function DailyChecklist({ day }: { day: DayPlan }) {
+export default function DailyChecklist({ day, completions }: DailyChecklistProps) {
+  if (!completions) {
+    return (
+      <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+        Missing completions prop — PlannerPage must pass
+        {" "}
+        <code>completions=useDailyCompletions(...)</code>
+      </div>
+    );
+  }
 
-  const { completed, toggle } = useDailyCompletions(
-    new Date(day.date + "T00:00:00")
-  );
+  const { completed, toggle } = completions;
 
   const isDone = (key: string) => completed.has(key);
-
-  const taskKeys = [
-    ...day.homework.items.map((t) => `deadline_task:${t.id}`),
-    ...day.weekly.items.map((t) => `weekly_task:${t.id}`),
-    ...day.projects.items.map((p) => `project:${p.projectId}`),
-    // NOTE: revision completion is disabled for now, so not counted here
-  ];
 
   const totalTasks =
     day.homework.items.length +
@@ -48,7 +40,11 @@ export default function DailyChecklist({ day }: { day: DayPlan }) {
     day.revision.slots.length +
     day.projects.items.length;
 
-  const completedTasks = taskKeys.filter((k) => completed.has(k)).length;
+  const completedTasks = [
+    ...day.homework.items.map((t) => `deadline_task:${t.id}`),
+    ...day.weekly.items.map((t) => `weekly_task:${t.id}`),
+    ...day.projects.items.map((p) => `project:${p.projectId}`),
+  ].filter((k) => completed.has(k)).length;
 
   return (
     <div className="space-y-8">
@@ -59,21 +55,20 @@ export default function DailyChecklist({ day }: { day: DayPlan }) {
         </span>
       </div>
 
-      {/* OVERLOAD WARNING */}
       {day.totalUsed > day.baseCapacity && (
         <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
           ⚠️ Day overloaded ({day.totalUsed} / {day.baseCapacity} mins)
         </div>
       )}
 
-      {/* HOMEWORK */}
       <Section title="Homework & assignments">
-        {day.homework.items.map((t) => {
-          const key = `deadline_task:${t.id}`;
+        {day.homework.items.map((t, i) => {
+          const completionKey = `deadline_task:${t.id}`;
+          const reactKey = `deadline_task:${t.id}:${day.date}:${i}`;
           return (
             <Item
-              key={key}
-              checked={isDone(key)}
+              key={reactKey}
+              checked={isDone(completionKey)}
               onToggle={() => toggle("deadline_task", t.id)}
               label={`${t.name} · ${t.minutes} mins`}
               meta={`Due ${formatDate(t.dueDate)}`}
@@ -82,14 +77,14 @@ export default function DailyChecklist({ day }: { day: DayPlan }) {
         })}
       </Section>
 
-      {/* WEEKLY */}
       <Section title="Weekly tasks">
-        {day.weekly.items.map((t) => {
-          const key = `weekly_task:${t.id}`;
+        {day.weekly.items.map((t, i) => {
+          const completionKey = `weekly_task:${t.id}`;
+          const reactKey = `weekly_task:${t.id}:${day.date}:${i}`;
           return (
             <Item
-              key={key}
-              checked={isDone(key)}
+              key={reactKey}
+              checked={isDone(completionKey)}
               onToggle={() => toggle("weekly_task", t.id)}
               label={`${t.name} · ${t.minutes} mins`}
               meta="Recurring"
@@ -98,11 +93,10 @@ export default function DailyChecklist({ day }: { day: DayPlan }) {
         })}
       </Section>
 
-      {/* REVISION (display-only for now) */}
       <Section title="Revision">
         {day.revision.slots.map((s, i) => (
           <Item
-            key={`${s.examId}-${i}`}
+            key={`revision:${s.examId}:${day.date}:${i}`}
             checked={false}
             disabled
             label={`${s.label} · ${s.slotMinutes} mins`}
@@ -111,14 +105,14 @@ export default function DailyChecklist({ day }: { day: DayPlan }) {
         ))}
       </Section>
 
-      {/* PROJECTS */}
       <Section title="Projects">
-        {day.projects.items.map((p) => {
-          const key = `project:${p.projectId}`;
+        {day.projects.items.map((p, i) => {
+          const completionKey = `project:${p.projectId}`;
+          const reactKey = `project:${p.projectId}:${day.date}:${i}`;
           return (
             <Item
-              key={key}
-              checked={isDone(key)}
+              key={reactKey}
+              checked={isDone(completionKey)}
               onToggle={() => toggle("project", p.projectId)}
               label={`${p.name} · ${p.minutes} mins`}
               meta="Project"
@@ -130,23 +124,12 @@ export default function DailyChecklist({ day }: { day: DayPlan }) {
   );
 }
 
-/* ================================
-   Small UI helpers
-================================ */
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const count = React.Children.count(children);
 
   return (
     <section className="space-y-2">
       <h3 className="text-sm font-medium text-gray-500">{title}</h3>
-
       {count === 0 ? (
         <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
           Nothing scheduled.
@@ -179,11 +162,13 @@ function Item({
     >
       <label className="flex items-center gap-3">
         <input
-          type="checkbox"
-          checked={checked}
-          onChange={onToggle}
-          disabled={disabled}
+            type="checkbox"
+            defaultChecked={checked}
+            onChange={() => onToggle?.()}
+            disabled={disabled}
         />
+
+
         <span className={`text-sm ${checked ? "line-through" : ""}`}>
           {label}
         </span>
