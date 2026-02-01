@@ -7,7 +7,7 @@ export type Exam = {
   id: string;
   subject: string | null;
   exam_type: "Internal" | "Board" | "Competitive";
-  date: string; // YYYY-MM-DD (date-only semantics)
+  date: string; // YYYY-MM-DD
   preparedness: number | null;
 };
 
@@ -18,12 +18,14 @@ export function useExams() {
   const fetchExams = useCallback(async () => {
     setLoading(true);
 
+    // 🚀 FILTER: Get today's date in YYYY-MM-DD to filter out past exams
+    const today = new Date().toISOString().slice(0, 10);
+
     const { data, error } = await supabase
       .from("exams")
       .select("id, subject, exam_type, date, preparedness")
+      .gte("date", today) // Only fetch exams scheduled for today or later
       .order("date", { ascending: true });
-
-    console.log("FETCH EXAMS", data?.length);
 
     if (error) {
       console.error("Failed to fetch exams:", error);
@@ -39,11 +41,14 @@ export function useExams() {
     fetchExams();
   }, [fetchExams]);
 
+  // Derived state remains the same to avoid regressing your metrics
+  const subjectCount = Array.from(
+    new Set((upcoming ?? []).map((e) => e.subject).filter(Boolean))
+  ).length;
+
   return {
-    upcoming,
-    subjectCount: Array.from(
-      new Set((upcoming ?? []).map((e) => e.subject).filter(Boolean))
-    ).length,
+    upcoming, // This is now filtered to only include future exams
+    subjectCount,
     loading,
     refresh: fetchExams,
   };
