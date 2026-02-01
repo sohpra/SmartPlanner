@@ -3,6 +3,15 @@
 import React from "react";
 import type { DayPlan } from "@/lib/planner/buildWeekPlan";
 
+type Props = {
+  day: DayPlan;
+  completions: {
+    completed: Set<string>;
+    toggle: (source_type: string, source_id: string) => Promise<void> | void;
+    dateKey: string;
+  };
+};
+
 function formatDate(date: string) {
   const d = new Date(date + "T00:00:00");
   const dow = d.toLocaleDateString("en-GB", { weekday: "short" });
@@ -11,64 +20,26 @@ function formatDate(date: string) {
   return `${dow} ${day}/${month}`;
 }
 
-export type DailyChecklistProps = {
-  day: DayPlan;
-  completions: {
-    completed: Set<string>;
-    toggle: (source_type: string, source_id: string) => Promise<void>;
-  };
-};
+export default function DailyChecklist({ day, completions }: Props) {
+  const { completed, toggle, dateKey } = completions;
 
-export default function DailyChecklist({ day, completions }: DailyChecklistProps) {
-  if (!completions) {
-    return (
-      <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-        Missing completions prop — PlannerPage must pass
-        {" "}
-        <code>completions=useDailyCompletions(...)</code>
-      </div>
-    );
-  }
+  // canonical key used in the hook's Set
+  const k = (type: string, id: string) => `${type}:${id}:${dateKey}`;
 
-  const { completed, toggle } = completions;
-
-  const isDone = (key: string) => completed.has(key);
-
-  const totalTasks =
-    day.homework.items.length +
-    day.weekly.items.length +
-    day.revision.slots.length +
-    day.projects.items.length;
-
-  const completedTasks = [
-    ...day.homework.items.map((t) => `deadline_task:${t.id}`),
-    ...day.weekly.items.map((t) => `weekly_task:${t.id}`),
-    ...day.projects.items.map((p) => `project:${p.projectId}`),
-  ].filter((k) => completed.has(k)).length;
+  const hw = day.homework.items.filter((t) => !!t.id);
+  const weekly = day.weekly.items.filter((t) => !!t.id);
+  const projects = day.projects.items.filter((p) => !!p.projectId);
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Today</h2>
-        <span className="text-sm text-gray-600">
-          {completedTasks} / {totalTasks} tasks completed
-        </span>
-      </div>
-
-      {day.totalUsed > day.baseCapacity && (
-        <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-          ⚠️ Day overloaded ({day.totalUsed} / {day.baseCapacity} mins)
-        </div>
-      )}
-
+      {/* HOMEWORK */}
       <Section title="Homework & assignments">
-        {day.homework.items.map((t, i) => {
-          const completionKey = `deadline_task:${t.id}`;
-          const reactKey = `deadline_task:${t.id}:${day.date}:${i}`;
+        {hw.map((t) => {
+          const key = k("deadline_task", t.id);
           return (
             <Item
-              key={reactKey}
-              checked={isDone(completionKey)}
+              key={key}
+              checked={completed.has(key)}
               onToggle={() => toggle("deadline_task", t.id)}
               label={`${t.name} · ${t.minutes} mins`}
               meta={`Due ${formatDate(t.dueDate)}`}
@@ -77,14 +48,14 @@ export default function DailyChecklist({ day, completions }: DailyChecklistProps
         })}
       </Section>
 
+      {/* WEEKLY */}
       <Section title="Weekly tasks">
-        {day.weekly.items.map((t, i) => {
-          const completionKey = `weekly_task:${t.id}`;
-          const reactKey = `weekly_task:${t.id}:${day.date}:${i}`;
+        {weekly.map((t) => {
+          const key = k("weekly_task", t.id);
           return (
             <Item
-              key={reactKey}
-              checked={isDone(completionKey)}
+              key={key}
+              checked={completed.has(key)}
               onToggle={() => toggle("weekly_task", t.id)}
               label={`${t.name} · ${t.minutes} mins`}
               meta="Recurring"
@@ -93,26 +64,33 @@ export default function DailyChecklist({ day, completions }: DailyChecklistProps
         })}
       </Section>
 
+      {/* REVISION */}
       <Section title="Revision">
-        {day.revision.slots.map((s, i) => (
-          <Item
-            key={`revision:${s.examId}:${day.date}:${i}`}
-            checked={false}
-            disabled
-            label={`${s.label} · ${s.slotMinutes} mins`}
-            meta="Revision"
-          />
-        ))}
-      </Section>
+        {day.revision.slots.map((s, i) => {
+          // revision has no DB id; use deterministic per-day slot id
+          const syntheticId = `${s.examId}:${i}`;
+          const key = k("revision", syntheticId);
 
-      <Section title="Projects">
-        {day.projects.items.map((p, i) => {
-          const completionKey = `project:${p.projectId}`;
-          const reactKey = `project:${p.projectId}:${day.date}:${i}`;
           return (
             <Item
-              key={reactKey}
-              checked={isDone(completionKey)}
+              key={key}
+              checked={completed.has(key)}
+              onToggle={() => toggle("revision", syntheticId)}
+              label={`${s.label} · ${s.slotMinutes} mins`}
+              meta="Revision"
+            />
+          );
+        })}
+      </Section>
+
+      {/* PROJECTS */}
+      <Section title="Projects">
+        {projects.map((p) => {
+          const key = k("project", p.projectId);
+          return (
+            <Item
+              key={key}
+              checked={completed.has(key)}
               onToggle={() => toggle("project", p.projectId)}
               label={`${p.name} · ${p.minutes} mins`}
               meta="Project"
@@ -124,12 +102,19 @@ export default function DailyChecklist({ day, completions }: DailyChecklistProps
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   const count = React.Children.count(children);
 
   return (
     <section className="space-y-2">
       <h3 className="text-sm font-medium text-gray-500">{title}</h3>
+
       {count === 0 ? (
         <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
           Nothing scheduled.
@@ -146,30 +131,17 @@ function Item({
   onToggle,
   label,
   meta,
-  disabled,
 }: {
   checked: boolean;
-  onToggle?: () => void;
+  onToggle: () => void;
   label: string;
   meta: string;
-  disabled?: boolean;
 }) {
   return (
-    <div
-      className={`flex items-center justify-between rounded-lg border bg-white p-3 ${
-        checked ? "opacity-60" : ""
-      }`}
-    >
-      <label className="flex items-center gap-3">
-        <input
-            type="checkbox"
-            defaultChecked={checked}
-            onChange={() => onToggle?.()}
-            disabled={disabled}
-        />
-
-
-        <span className={`text-sm ${checked ? "line-through" : ""}`}>
+    <div className={`flex items-center justify-between rounded-lg border bg-white p-3`}>
+      <label className="flex items-center gap-3 cursor-pointer select-none">
+        <input type="checkbox" checked={checked} onChange={onToggle} />
+        <span className={`text-sm ${checked ? "line-through opacity-70" : ""}`}>
           {label}
         </span>
       </label>
