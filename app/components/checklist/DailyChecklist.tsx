@@ -1,8 +1,5 @@
 "use client";
 
-import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
-import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
-import { useProjects } from "@/hooks/use-projects";
 import { useDailyCompletions } from "@/hooks/use-daily-completions";
 
 /* ================================
@@ -10,7 +7,7 @@ import { useDailyCompletions } from "@/hooks/use-daily-completions";
 ================================ */
 
 export type RevisionSlot = {
-  examId: string;
+  examId: string; // uuid
   subject: string;
   slotMinutes: number;
   label: string;
@@ -18,61 +15,129 @@ export type RevisionSlot = {
 
 type Props = {
   date: Date;
-  revisionSlots?: RevisionSlot[];
+
+  weeklyItems: { id: string; name: string; minutes: number }[];
+  homeworkItems: { id: string; name: string; dueDate: string; minutes: number }[];
+  revisionSlots: RevisionSlot[];
+  projectItems: { projectId: string; name: string; minutes: number }[];
 };
 
 /* ================================
-   Component
+   Helpers
 ================================ */
 
-export function DailyChecklist({ date, revisionSlots = [] }: Props) {
-  const dayIndex = date.getDay();
+function formatDueDate(dateStr: string) {
+  const d = new Date(dateStr + "T00:00:00");
+  const dow = d.toLocaleDateString("en-GB", { weekday: "short" });
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dow} ${day}/${month}`;
+}
+
+export function DailyChecklist({
+  date,
+  weeklyItems,
+  homeworkItems,
+  revisionSlots,
+  projectItems,
+}: Props) {
   const { completed, toggle } = useDailyCompletions(date);
 
-  const { tasks: weeklyTasks, isLoading: weeklyLoading } = useWeeklyTasks();
-  const { tasks: deadlineTasks, isLoading: deadlineLoading } =
-    useDeadlineTasks();
-  const { projects, isLoading: projectsLoading } = useProjects();
+  const isDone = (key: string) => completed.has(key);
 
-  if (weeklyLoading || deadlineLoading || projectsLoading) {
-    return <div className="p-4">Loading checklist…</div>;
-  }
+  const completionCount = (keys: string[]) => {
+    if (keys.length === 0) return "0 / 0";
+    const done = keys.filter((k) => completed.has(k)).length;
+    return `${done} / ${keys.length}`;
+  };
 
-  const todaysWeeklyTasks = weeklyTasks.filter(
-    (t) => t.day_of_week === dayIndex
-  );
+  // Trackable keys (UUID-based)
+  const weeklyKeys = weeklyItems.map((t) => `weekly_task:${t.id}`);
+  const projectKeys = projectItems.map((p) => `project:${p.projectId}`);
+  const revisionExamKeys = Array.from(new Set(revisionSlots.map((s) => `revision:${s.examId}`)));
 
-  function isDone(key: string) {
-    return completed.has(key);
-  }
+  // Homework is not trackable with current DB CHECK constraint unless you extend it.
+  // We'll show checkboxes disabled for homework for now to avoid "it ticks then disappears".
+  const homeworkKeys: string[] = []; // intentionally excluded from completion
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <h2 className="text-lg font-semibold">Today’s checklist</h2>
+
+      {/* ===================== */}
+      {/* HOMEWORK & ASSIGNMENTS */}
+      {/* ===================== */}
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-gray-500">Homework & assignments</h3>
+
+          {homeworkItems.length > 0 && (
+            <span className="text-xs text-gray-400">{completionCount(homeworkKeys)}</span>
+          )}
+        </div>
+
+        {homeworkItems.length === 0 ? (
+          <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
+            No homework scheduled.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {homeworkItems.map((task, idx) => {
+              const key = `deadline_task:${task.id}:${idx}`;
+
+              return (
+                <div
+                  key={key}
+                  className="flex items-center justify-between rounded-lg border bg-white p-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <input type="checkbox" disabled />
+                    <span className="text-sm">
+                      <strong>{task.name}</strong> · {task.minutes} mins
+                    </span>
+                  </div>
+
+                  <span className="text-xs text-gray-400">Due {formatDueDate(task.dueDate)}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {homeworkItems.length > 0 && (
+          <div className="mt-2 text-xs text-gray-400">
+            Homework completion tracking can be enabled once <code>daily_completions</code> allows
+            <code> deadline_task</code>.
+          </div>
+        )}
+      </section>
 
       {/* ===================== */}
       {/* WEEKLY TASKS */}
       {/* ===================== */}
       <section>
-        <h3 className="mb-2 text-sm font-medium text-gray-500">
-          Weekly tasks
-        </h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-gray-500">Weekly tasks</h3>
+          {weeklyItems.length > 0 && (
+            <span className="text-xs text-gray-400">{completionCount(weeklyKeys)}</span>
+          )}
+        </div>
 
-        {todaysWeeklyTasks.length === 0 ? (
+        {weeklyItems.length === 0 ? (
           <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
             No recurring tasks today.
           </div>
         ) : (
           <div className="space-y-2">
-            {todaysWeeklyTasks.map((task) => {
+            {weeklyItems.map((task) => {
               const key = `weekly_task:${task.id}`;
 
               return (
                 <div
                   key={key}
-                  className={`flex items-center justify-between rounded-lg border bg-white p-3
-                    ${isDone(key) ? "opacity-60" : ""}
-                  `}
+                  className={`flex items-center justify-between rounded-lg border bg-white p-3 ${
+                    isDone(key) ? "opacity-60" : ""
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     <input
@@ -81,19 +146,12 @@ export function DailyChecklist({ date, revisionSlots = [] }: Props) {
                       onChange={() => toggle("weekly_task", task.id)}
                     />
 
-                    <span
-                      className={`text-sm ${
-                        isDone(key) ? "line-through" : ""
-                      }`}
-                    >
-                      <strong>{task.name}</strong> ·{" "}
-                      {task.duration_minutes} mins
+                    <span className={`text-sm ${isDone(key) ? "line-through" : ""}`}>
+                      <strong>{task.name}</strong> · {task.minutes} mins
                     </span>
                   </div>
 
-                  <span className="text-xs text-gray-400">
-                    Recurring
-                  </span>
+                  <span className="text-xs text-gray-400">Recurring</span>
                 </div>
               );
             })}
@@ -102,51 +160,46 @@ export function DailyChecklist({ date, revisionSlots = [] }: Props) {
       </section>
 
       {/* ===================== */}
-      {/* HOMEWORK & ASSIGNMENTS */}
+      {/* REVISION */}
       {/* ===================== */}
       <section>
-        <h3 className="mb-2 text-sm font-medium text-gray-500">
-          Homework & assignments
-        </h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-gray-500">Revision</h3>
+          {revisionExamKeys.length > 0 && (
+            <span className="text-xs text-gray-400">{completionCount(revisionExamKeys)}</span>
+          )}
+        </div>
 
-        {deadlineTasks.length === 0 ? (
+        {revisionSlots.length === 0 ? (
           <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
-            No homework scheduled.
+            No revision planned for today.
           </div>
         ) : (
           <div className="space-y-2">
-            {deadlineTasks.map((task) => {
-              const key = `deadline_task:${task.id}`;
+            {revisionSlots.map((slot, idx) => {
+              // We track completion per examId (uuid) because daily_completions.source_id must be uuid.
+              const key = `revision:${slot.examId}`;
+              const checked = isDone(key);
 
               return (
                 <div
-                  key={key}
-                  className={`flex items-center justify-between rounded-lg border bg-white p-3
-                    ${isDone(key) ? "opacity-60" : ""}
-                  `}
+                  key={`${slot.examId}-${idx}`}
+                  className={`flex items-center justify-between rounded-lg border bg-white p-3 ${
+                    checked ? "opacity-60" : ""
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     <input
                       type="checkbox"
-                      checked={isDone(key)}
-                      onChange={() =>
-                        toggle("deadline_task", task.id)
-                      }
+                      checked={checked}
+                      onChange={() => toggle("revision", slot.examId)}
                     />
-
-                    <span
-                      className={`text-sm ${
-                        isDone(key) ? "line-through" : ""
-                      }`}
-                    >
-                      <strong>{task.name}</strong> ·{" "}
-                      {task.estimated_minutes} mins
+                    <span className={`text-sm ${checked ? "line-through" : ""}`}>
+                      <strong>{slot.label}</strong> · {slot.slotMinutes} mins
                     </span>
                   </div>
 
-                  <span className="text-xs text-gray-400">
-                    Due {task.due_date}
-                  </span>
+                  <span className="text-xs text-gray-400">Revision</span>
                 </div>
               );
             })}
@@ -158,90 +211,44 @@ export function DailyChecklist({ date, revisionSlots = [] }: Props) {
       {/* PROJECTS */}
       {/* ===================== */}
       <section>
-        <h3 className="mb-2 text-sm font-medium text-gray-500">
-          Projects
-        </h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-gray-500">Projects</h3>
+          {projectItems.length > 0 && (
+            <span className="text-xs text-gray-400">{completionCount(projectKeys)}</span>
+          )}
+        </div>
 
-        {projects.filter((p) => p.status === "active").length ===
-        0 ? (
+        {projectItems.length === 0 ? (
           <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
-            No active projects.
+            No project work planned for today.
           </div>
         ) : (
           <div className="space-y-2">
-            {projects
-              .filter((p) => p.status === "active")
-              .slice(0, 2)
-              .map((project) => {
-                const key = `project:${project.id}`;
+            {projectItems.map((project) => {
+              const key = `project:${project.projectId}`;
 
-                return (
-                  <div
-                    key={key}
-                    className={`flex items-center justify-between rounded-lg border bg-white p-3
-                      ${isDone(key) ? "opacity-60" : ""}
-                    `}
-                  >
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={isDone(key)}
-                        onChange={() =>
-                          toggle("project", project.id)
-                        }
-                      />
-
-                      <span
-                        className={`text-sm ${
-                          isDone(key) ? "line-through" : ""
-                        }`}
-                      >
-                        <strong>{project.name}</strong> · project work
-                      </span>
-                    </div>
-
-                    <span className="text-xs text-gray-400">
-                      Project
+              return (
+                <div
+                  key={key}
+                  className={`flex items-center justify-between rounded-lg border bg-white p-3 ${
+                    isDone(key) ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={isDone(key)}
+                      onChange={() => toggle("project", project.projectId)}
+                    />
+                    <span className={`text-sm ${isDone(key) ? "line-through" : ""}`}>
+                      <strong>{project.name}</strong> · {project.minutes} mins
                     </span>
                   </div>
-                );
-              })}
-          </div>
-        )}
-      </section>
 
-      {/* ===================== */}
-      {/* REVISION */}
-      {/* ===================== */}
-      <section>
-        <h3 className="mb-2 text-sm font-medium text-gray-500">
-          Revision
-        </h3>
-
-        {revisionSlots.length === 0 ? (
-          <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
-            No revision planned for today.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {revisionSlots.map((slot, idx) => (
-              <div
-                key={`${slot.examId}-${idx}`}
-                className="flex items-center justify-between rounded-lg border bg-white p-3 opacity-60"
-              >
-                <div className="flex items-center gap-3">
-                  <input type="checkbox" disabled />
-                  <span className="text-sm">
-                    <strong>{slot.label}</strong> ·{" "}
-                    {slot.slotMinutes} mins
-                  </span>
+                  <span className="text-xs text-gray-400">Project</span>
                 </div>
-
-                <span className="text-xs text-gray-400">
-                  Revision
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
