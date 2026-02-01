@@ -6,20 +6,27 @@ import { supabase } from "@/lib/supabase/client";
 export function useDailyCompletions(date: Date) {
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Format the date consistently as YYYY-MM-DD
   const dateKey = date.toISOString().slice(0, 10);
 
   const fetchCompletions = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    setIsLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setIsLoading(false);
+      return;
+    }
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("daily_completions")
-      .select("source_id")
-      .eq("user_id", user.id)
+      .select("source_type, source_id")
+      .eq("user_id", session.user.id)
       .eq("date", dateKey);
 
-    if (data) {
-      setCompleted(new Set(data.map((r) => r.source_id)));
+    if (!error && data) {
+      const keys = data.map((item) => `${item.source_type}:${item.source_id}:${dateKey}`);
+      setCompleted(new Set(keys));
     }
     setIsLoading(false);
   }, [dateKey]);
@@ -28,50 +35,65 @@ export function useDailyCompletions(date: Date) {
     fetchCompletions();
   }, [fetchCompletions]);
 
-const toggleDeadlineTask = useCallback(
-  async (taskId: string) => {
-    // 1. Optimistic UI update
-    const isCurrentlyDone = completed.has(taskId);
-    setCompleted((prev) => {
+  const toggleDeadlineTask = useCallback(async (source_type: string, source_id: string) => {
+    // 🛡️ Guard against the 400 Error: check if id is actually a type string
+    if (source_id === "deadline_task" || source_id === "weekly_task" || source_id === "revision") {
+      console.error("Argument Swap Detected! source_id is a type string:", source_id);
+      return;
+    }
+
+    const key = `${source_type}:${source_id}:${dateKey}`;
+    const isCurrentlyDone = completed.has(key);
+
+    // 🚀 Optimistic UI Update (Immediate Checkbox Toggle)
+    setCompleted((prev: Set<string>) => {
       const next = new Set(prev);
-      isCurrentlyDone ? next.delete(taskId) : next.add(taskId);
+      if (isCurrentlyDone) next.delete(key);
+      else next.add(key);
       return next;
     });
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
 
     if (isCurrentlyDone) {
-      // --- UNCHECKING ---
-      // Remove from today's log
+      // 1. Remove from daily_completions
       await supabase.from("daily_completions")
         .delete()
-        .eq("user_id", user.id)
-        .eq("source_id", taskId);
+        .eq("user_id", session.user.id)
+        .eq("source_type", source_type)
+        .eq("source_id", source_id)
+        .eq("date", dateKey);
 
-      // 🚀 UPDATE status to 'active' (Don't delete the task!)
-      await supabase.from("deadline_tasks")
-        .update({ status: 'active' })
-        .eq("id", taskId);
-
+      // 2. If it's a deadline task, update its status
+      if (source_type === "deadline_task") {
+        await supabase.from("deadline_tasks")
+          .update({ status: 'active' })
+          .eq("id", source_id);
+      }
     } else {
-      // --- CHECKING ---
-      // Add to today's log
+      // 1. Add to daily_completions
       await supabase.from("daily_completions").insert({
-        user_id: user.id,
-        source_type: "deadline_task",
-        source_id: taskId,
+        user_id: session.user.id,
+        source_type,
+        source_id,
         date: dateKey,
       });
 
-      // 🚀 UPDATE status to 'completed'
-      await supabase.from("deadline_tasks")
-        .update({ status: 'completed' })
-        .eq("id", taskId);
+      // 2. If it's a deadline task, update its status
+      if (source_type === "deadline_task") {
+        await supabase.from("deadline_tasks")
+          .update({ status: 'completed' })
+          .eq("id", source_id);
+      }
     }
-  },
-  [completed, dateKey]
-);
+  }, [completed, dateKey]);
 
-  return { completed, isLoading, toggleDeadlineTask };
+  return { 
+    completed, 
+    toggleDeadlineTask, 
+    dateKey, 
+    isLoading,
+    refresh: fetchCompletions 
+  };
 }

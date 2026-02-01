@@ -117,9 +117,22 @@ function clamp(n: number, min: number, max: number) {
 export function toDateOnly(dateStr: string): string {
   return dateStr.slice(0, 10);
 }
-
+//changed
+// src/lib/planner/revisionEngine.ts
 export function addDays(dateYYYYMMDD: string, days: number): string {
-  const d = new Date(dateYYYYMMDD + "T00:00:00");
+  // If dateYYYYMMDD is malformed or missing, fallback to today to prevent crash
+  if (!dateYYYYMMDD || dateYYYYMMDD === "undefined") {
+    dateYYYYMMDD = new Date().toISOString().slice(0, 10);
+  }
+
+  // Ensure we are only using the date part (YYYY-MM-DD)
+  const cleanDate = dateYYYYMMDD.split('T')[0];
+  const d = new Date(cleanDate + "T00:00:00");
+
+  if (isNaN(d.getTime())) {
+    return new Date().toISOString().slice(0, 10);
+  }
+
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
 }
