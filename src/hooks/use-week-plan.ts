@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
 import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
@@ -17,7 +17,7 @@ function localDateKey(d: Date) {
 }
 
 type SnapshotInputs = {
-  today: string; // YYYY-MM-DD anchor for the plan window
+  today: string;
   numDays: number;
 
   weeklyTasks: {
@@ -53,27 +53,10 @@ type SnapshotInputs = {
   }[];
 };
 
-function storageKey(numDays: number) {
-  return `smartplanner_weekplan_snapshot_v1_${numDays}`;
-}
-
-function safeParseSnapshot(raw: string | null): SnapshotInputs | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as SnapshotInputs;
-
-    // Minimal validation to avoid bricking the app on bad storage.
-    if (!parsed || typeof parsed !== "object") return null;
-    if (typeof parsed.today !== "string") return null;
-    if (typeof parsed.numDays !== "number") return null;
-    if (!Array.isArray(parsed.weeklyTasks)) return null;
-    if (!Array.isArray(parsed.deadlines)) return null;
-    if (!Array.isArray(parsed.exams)) return null;
-    if (!Array.isArray(parsed.projects)) return null;
-
-    return parsed;
-  } catch {
-    return null;
+function warnIfMissingIds(label: string, rows: any[]) {
+  const bad = rows.filter((r) => !r?.id);
+  if (bad.length > 0) {
+    console.warn(`[useWeekPlan] ${label}: missing id rows`, bad);
   }
 }
 
@@ -89,80 +72,79 @@ export function useWeekPlan(numDays = 7): {
   const projects = useProjects();
 
   const isLoading =
-    weekly.isLoading ||
-    deadlines.isLoading ||
-    exams.loading ||
-    projects.isLoading;
+    weekly.isLoading || deadlines.isLoading || exams.loading || projects.isLoading;
 
   const [snapshot, setSnapshot] = useState<SnapshotInputs | null>(null);
 
-  // 🔒 Survives within a mount; sessionStorage survives remounts.
-  const hasInitialised = useRef(false);
+  const buildSnapshot = useCallback((): SnapshotInputs => {
+    // 1) Weekly: map to engine shape + filter missing ids
+    warnIfMissingIds("weekly.tasks", weekly.tasks as any[]);
+    const weeklyTasks = (weekly.tasks ?? [])
+      .filter((t: any) => !!t?.id)
+      .map((t: any) => ({
+        id: t.id as string,
+        name: t.name as string,
+        duration_minutes: Number(t.duration_minutes ?? 0),
+        day_of_week: Number(t.day_of_week ?? 0),
+      }));
 
-  // 1) On mount, try to restore snapshot from sessionStorage.
+    // 2) Deadlines: map to engine shape + filter missing ids
+    warnIfMissingIds("deadline.tasks", deadlines.tasks as any[]);
+    const deadlineTasks = (deadlines.tasks ?? [])
+      .filter((t: any) => !!t?.id)
+      .map((t: any) => ({
+        id: t.id as string,
+        name: t.name as string,
+        due_date: t.due_date as string,
+        estimated_minutes: Number(t.estimated_minutes ?? 0),
+      }));
+
+    // 3) Exams: use upcoming but still enforce ids
+    warnIfMissingIds("exams.upcoming", exams.upcoming as any[]);
+    const examInputs = (exams.upcoming ?? [])
+      .filter((e: any) => !!e?.id)
+      .map((e: any) => ({
+        id: e.id as string,
+        subject: (e.subject ?? null) as string | null,
+        exam_type: e.exam_type as "Internal" | "Board" | "Competitive",
+        date: e.date as string,
+        preparedness: (e.preparedness ?? null) as number | null,
+      }));
+
+    // 4) Projects: enforce ids
+    warnIfMissingIds("projects.projects", projects.projects as any[]);
+    const projectInputs = (projects.projects ?? [])
+      .filter((p: any) => !!p?.id)
+      .map((p: any) => ({
+        id: p.id as string,
+        name: p.name as string,
+        subject: (p.subject ?? null) as string | null,
+        due_date: p.due_date as string,
+        estimated_minutes: Number(p.estimated_minutes ?? 0),
+        completed_minutes: Number(p.completed_minutes ?? 0),
+        status: p.status as "active" | "completed" | "paused",
+      }));
+
+    return {
+      today: localDateKey(new Date()),
+      numDays,
+      weeklyTasks,
+      deadlines: deadlineTasks,
+      exams: examInputs,
+      projects: projectInputs,
+    };
+  }, [numDays, weekly.tasks, deadlines.tasks, exams.upcoming, projects.projects]);
+
+  // Take initial snapshot ONCE when loaded
   useEffect(() => {
-    if (hasInitialised.current) return;
-
-    const restored =
-      typeof window !== "undefined"
-        ? safeParseSnapshot(sessionStorage.getItem(storageKey(numDays)))
-        : null;
-
-    if (restored) {
-      hasInitialised.current = true;
-      setSnapshot(restored);
-    }
-  }, [numDays]);
-
-  // 2) If no restored snapshot, take the initial snapshot ONCE when loaded.
-  useEffect(() => {
-    if (hasInitialised.current) return;
     if (snapshot) return;
     if (isLoading) return;
+    setSnapshot(buildSnapshot());
+  }, [snapshot, isLoading, buildSnapshot]);
 
-    const initial: SnapshotInputs = {
-      today: localDateKey(new Date()),
-      numDays,
-      weeklyTasks: weekly.tasks,
-      deadlines: deadlines.tasks,
-      exams: exams.upcoming,
-      projects: projects.projects,
-    };
-
-    hasInitialised.current = true;
-    setSnapshot(initial);
-
-    // Persist it so a remount (e.g. router.refresh) does NOT auto-resnapshot.
-    if (typeof window !== "undefined") {
-      sessionStorage.setItem(storageKey(numDays), JSON.stringify(initial));
-    }
-  }, [
-    isLoading,
-    snapshot,
-    numDays,
-    weekly.tasks,
-    deadlines.tasks,
-    exams.upcoming,
-    projects.projects,
-  ]);
-
-  // 3) Explicit refresh: overwrite snapshot + persist.
   const refresh = useCallback(() => {
-    const next: SnapshotInputs = {
-      today: localDateKey(new Date()),
-      numDays,
-      weeklyTasks: weekly.tasks,
-      deadlines: deadlines.tasks,
-      exams: exams.upcoming,
-      projects: projects.projects,
-    };
-
-    setSnapshot(next);
-
-    if (typeof window !== "undefined") {
-      sessionStorage.setItem(storageKey(numDays), JSON.stringify(next));
-    }
-  }, [numDays, weekly.tasks, deadlines.tasks, exams.upcoming, projects.projects]);
+    setSnapshot(buildSnapshot());
+  }, [buildSnapshot]);
 
   const weekPlan = useMemo(() => {
     if (!snapshot) return null;

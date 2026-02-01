@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
-type Exam = {
+export type Exam = {
   id: string;
-  subject: string;
-  exam_type: string;
-  date: string;
+  subject: string | null;
+  exam_type: "Internal" | "Board" | "Competitive";
+  date: string; // YYYY-MM-DD (date-only semantics)
+  preparedness: number | null;
 };
 
 export function useExams() {
@@ -19,7 +20,7 @@ export function useExams() {
 
     const { data, error } = await supabase
       .from("exams")
-      .select("id, subject, exam_type, date")
+      .select("id, subject, exam_type, date, preparedness")
       .order("date", { ascending: true });
 
     console.log("FETCH EXAMS", data?.length);
@@ -28,7 +29,7 @@ export function useExams() {
       console.error("Failed to fetch exams:", error);
       setUpcoming([]);
     } else {
-      setUpcoming(data ?? []);
+      setUpcoming((data ?? []) as Exam[]);
     }
 
     setLoading(false);
@@ -41,9 +42,9 @@ export function useExams() {
   return {
     upcoming,
     subjectCount: Array.from(
-      new Set(upcoming.map((e) => e.subject))
+      new Set((upcoming ?? []).map((e) => e.subject).filter(Boolean))
     ).length,
     loading,
-    refresh: fetchExams, // 🔑 THIS is the missing piece
+    refresh: fetchExams,
   };
 }

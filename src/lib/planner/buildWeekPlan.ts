@@ -1,4 +1,4 @@
-// lib/planner/buildWeekPlan.ts
+// src/lib/planner/buildWeekPlan.ts
 
 import {
   planRevisionSlots,
@@ -13,7 +13,7 @@ import {
 } from "@/lib/planner/projectAllocator";
 
 /* ================================
-   Types
+   Types (aligned to your schema)
    ================================ */
 
 export type DayPlan = {
@@ -21,12 +21,12 @@ export type DayPlan = {
 
   weekly: {
     minutes: number;
-    items: { name: string; minutes: number }[];
+    items: { id: string; name: string; minutes: number }[];
   };
 
   homework: {
     minutes: number;
-    items: { name: string; dueDate: string; minutes: number }[];
+    items: { id: string; name: string; dueDate: string; minutes: number }[];
   };
 
   revision: {
@@ -67,6 +67,13 @@ function buildBaseCapacity(start: string, days: number) {
   return out;
 }
 
+// exams.date is timestamptz in schema; normalise to YYYY-MM-DD in local time-safe way
+function examDateToDateOnly(examDate: string) {
+  // examDate is ISO timestamptz string from Supabase (usually)
+  // toDateOnly expects ISO string and returns YYYY-MM-DD
+  return toDateOnly(examDate);
+}
+
 /* ================================
    Main builder
    ================================ */
@@ -79,32 +86,39 @@ export function buildWeekPlan({
   exams,
   projects,
 }: {
-  today: string;
+  today: string; // YYYY-MM-DD
   numDays?: number;
+
   weeklyTasks: {
     id: string;
     name: string;
     duration_minutes: number;
     day_of_week: number;
   }[];
+
   deadlines: {
+    id: string;
     name: string;
-    due_date: string;
+    due_date: string; // date
     estimated_minutes: number;
   }[];
+
   exams: {
     id: string;
-    subject: string;
-    date: string;
+    subject: string | null;
+    exam_type: "Internal" | "Board" | "Competitive";
+    date: string; // timestamptz ISO
+    preparedness: number | null;
   }[];
+
   projects: {
     id: string;
     name: string;
-    subject?: string;
-    due_date?: string | null;
+    subject: string | null;
+    due_date: string; // date (NOT NULL)
     estimated_minutes: number;
     completed_minutes: number;
-    status: string;
+    status: "active" | "completed" | "paused";
   }[];
 }): WeekPlan {
   const windowDates = Array.from({ length: numDays }, (_, i) =>
@@ -120,7 +134,7 @@ export function buildWeekPlan({
   const weeklyMinutesByDate: Record<string, number> = {};
   const weeklyItemsByDate: Record<
     string,
-    { name: string; minutes: number }[]
+    { id: string; name: string; minutes: number }[]
   > = {};
 
   windowDates.forEach((d) => {
@@ -134,6 +148,7 @@ export function buildWeekPlan({
       if (dow === task.day_of_week) {
         weeklyMinutesByDate[d] += task.duration_minutes;
         weeklyItemsByDate[d].push({
+          id: task.id,
           name: task.name,
           minutes: task.duration_minutes,
         });
@@ -142,12 +157,12 @@ export function buildWeekPlan({
   }
 
   /* ================================
-     HOMEWORK & ASSIGNMENTS
+     HOMEWORK & ASSIGNMENTS (deadline_tasks)
      ================================ */
 
   const homeworkItemsByDate: Record<
     string,
-    { name: string; dueDate: string; minutes: number }[]
+    { id: string; name: string; dueDate: string; minutes: number }[]
   > = {};
 
   const remainingCap: Record<string, number> = {};
@@ -165,9 +180,11 @@ export function buildWeekPlan({
     let remaining = task.estimated_minutes;
     const candidates = windowDates.filter((d) => d < task.due_date);
 
+    // Avoid pointless splitting
     const oneDay = candidates.find((d) => remainingCap[d] >= remaining);
     if (oneDay) {
       homeworkItemsByDate[oneDay].push({
+        id: task.id,
         name: task.name,
         dueDate: task.due_date,
         minutes: remaining,
@@ -176,12 +193,14 @@ export function buildWeekPlan({
       continue;
     }
 
+    // Split only if unavoidable
     for (const d of candidates) {
       if (remaining <= 0) break;
       if (remainingCap[d] <= 0) continue;
 
       const used = Math.min(remainingCap[d], remaining);
       homeworkItemsByDate[d].push({
+        id: task.id,
         name: task.name,
         dueDate: task.due_date,
         minutes: used,
@@ -207,13 +226,20 @@ export function buildWeekPlan({
   windowDates.forEach((d) => {
     revisionCapacity[d] = Math.max(
       0,
-      baseCapacity[d] -
-        weeklyMinutesByDate[d] -
-        homeworkMinutesByDate[d]
+      baseCapacity[d] - weeklyMinutesByDate[d] - homeworkMinutesByDate[d]
     );
   });
 
-  const revisionPlan = planRevisionSlots(exams, {
+  // Convert DB exam rows to revisionEngine ExamInput
+  const examInputs = exams.map((e) => ({
+    id: e.id,
+    subject: e.subject ?? "Unknown subject",
+    date: examDateToDateOnly(e.date), // YYYY-MM-DD for the engine
+    exam_type: e.exam_type,
+    preparedness: e.preparedness ?? 0,
+  }));
+
+  const revisionPlan = planRevisionSlots(examInputs, {
     startDate: today,
     numDays,
     capacityByDate: revisionCapacity,
@@ -229,7 +255,7 @@ export function buildWeekPlan({
     .map((p) => ({
       projectId: p.id,
       name: p.name,
-      subject: p.subject,
+      subject: p.subject, // ProjectWeekPlan usually expects string | null
       dueDate: p.due_date,
       weeklyRemainingMinutes: Math.max(
         0,
@@ -262,35 +288,21 @@ export function buildWeekPlan({
     const weeklyMins = weeklyMinutesByDate[day.date];
     const homeworkMins = homeworkMinutesByDate[day.date];
     const revisionMins = day.usedMinutes;
+
     const projectItems = projectByDate[day.date] ?? [];
     const projectMins = projectItems.reduce((s, x) => s + x.minutes, 0);
 
-    const totalUsed =
-      weeklyMins + homeworkMins + revisionMins + projectMins;
+    const totalUsed = weeklyMins + homeworkMins + revisionMins + projectMins;
 
     return {
       date: day.date,
       baseCapacity: baseCapacity[day.date],
 
-      weekly: {
-        minutes: weeklyMins,
-        items: weeklyItemsByDate[day.date],
-      },
+      weekly: { minutes: weeklyMins, items: weeklyItemsByDate[day.date] },
+      homework: { minutes: homeworkMins, items: homeworkItemsByDate[day.date] },
+      revision: { minutes: revisionMins, slots: day.slots },
 
-      homework: {
-        minutes: homeworkMins,
-        items: homeworkItemsByDate[day.date],
-      },
-
-      revision: {
-        minutes: revisionMins,
-        slots: day.slots,
-      },
-
-      projects: {
-        minutes: projectMins,
-        items: projectItems,
-      },
+      projects: { minutes: projectMins, items: projectItems },
 
       totalUsed,
       spare: Math.max(0, baseCapacity[day.date] - totalUsed),

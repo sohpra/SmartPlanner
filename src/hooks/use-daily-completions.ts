@@ -1,103 +1,77 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
-function toDateKey(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
-
 export function useDailyCompletions(date: Date) {
-  const dateKey = useMemo(() => toDateKey(date), [date]);
-
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
+  const dateKey = date.toISOString().slice(0, 10);
 
-  const refetch = useCallback(async () => {
-    setIsLoading(true);
+  const fetchCompletions = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("daily_completions")
-      .select("source_type, source_id, date")
+      .select("source_id")
+      .eq("user_id", user.id)
       .eq("date", dateKey);
 
-    if (error) {
-      console.error("Failed to fetch completions", error);
-      setCompleted(new Set());
-      setIsLoading(false);
-      return;
+    if (data) {
+      setCompleted(new Set(data.map((r) => r.source_id)));
     }
-
-    // canonical storage key for current date only
-    const next = new Set<string>(
-      (data ?? []).map((r) => `${r.source_type}:${r.source_id}:${r.date}`)
-    );
-
-    setCompleted(next);
     setIsLoading(false);
   }, [dateKey]);
 
   useEffect(() => {
-    refetch();
-  }, [refetch]);
+    fetchCompletions();
+  }, [fetchCompletions]);
 
-  const toggle = useCallback(
-    async (source_type: string, source_id: string) => {
-      if (!source_id) {
-        console.warn("toggle called with empty source_id", { source_type });
-        return;
-      }
+const toggleDeadlineTask = useCallback(
+  async (taskId: string) => {
+    // 1. Optimistic UI update
+    const isCurrentlyDone = completed.has(taskId);
+    setCompleted((prev) => {
+      const next = new Set(prev);
+      isCurrentlyDone ? next.delete(taskId) : next.add(taskId);
+      return next;
+    });
 
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
 
-      if (userError || !user) {
-        console.error("No authenticated user", userError);
-        return;
-      }
+    if (isCurrentlyDone) {
+      // --- UNCHECKING ---
+      // Remove from today's log
+      await supabase.from("daily_completions")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("source_id", taskId);
 
-      const rowKey = `${source_type}:${source_id}:${dateKey}`;
-      const exists = completed.has(rowKey);
+      // 🚀 UPDATE status to 'active' (Don't delete the task!)
+      await supabase.from("deadline_tasks")
+        .update({ status: 'active' })
+        .eq("id", taskId);
 
-      if (exists) {
-        const { error } = await supabase
-          .from("daily_completions")
-          .delete()
-          .eq("user_id", user.id)
-          .eq("source_type", source_type)
-          .eq("source_id", source_id)
-          .eq("date", dateKey);
+    } else {
+      // --- CHECKING ---
+      // Add to today's log
+      await supabase.from("daily_completions").insert({
+        user_id: user.id,
+        source_type: "deadline_task",
+        source_id: taskId,
+        date: dateKey,
+      });
 
-        if (error) {
-          console.error("Failed to delete completion", error);
-          return;
-        }
+      // 🚀 UPDATE status to 'completed'
+      await supabase.from("deadline_tasks")
+        .update({ status: 'completed' })
+        .eq("id", taskId);
+    }
+  },
+  [completed, dateKey]
+);
 
-        setCompleted((prev) => {
-          const next = new Set(prev);
-          next.delete(rowKey);
-          return next;
-        });
-      } else {
-        const { error } = await supabase.from("daily_completions").insert({
-          user_id: user.id,
-          source_type,
-          source_id,
-          date: dateKey,
-        });
-
-        if (error) {
-          console.error("Failed to insert completion", error);
-          return;
-        }
-
-        setCompleted((prev) => new Set(prev).add(rowKey));
-      }
-    },
-    [completed, dateKey]
-  );
-
-  return { completed, toggle, isLoading, refetch, dateKey };
+  return { completed, isLoading, toggleDeadlineTask };
 }
