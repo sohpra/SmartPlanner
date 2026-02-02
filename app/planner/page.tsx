@@ -1,120 +1,191 @@
 "use client";
 
-import React, { useMemo } from "react";
-import { DashboardHeader } from "../components/dashboard/DashboardHeader";
-import { DashboardMetrics } from "../components/dashboard/DashboardMetrics";
+import { useMemo, useState, useEffect } from "react";
 import DailyChecklist from "../components/checklist/DailyChecklist";
 import { TomorrowChecklist } from "../components/checklist/TomorrowChecklist";
+import { WeeklyView } from "../components/dashboard/WeeklyView";
+import { MonthView } from "../components/dashboard/MonthView"; // You will create this file next
+import { DashboardHeader } from "../components/dashboard/DashboardHeader";
+import { DashboardMetrics } from "../components/dashboard/DashboardMetrics";
 import { ComingUp } from "../components/dashboard/ComingUp";
 
-import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
-import { useDailyCompletions } from "@/hooks/use-daily-completions";
+// Hooks
 import { useExams } from "@/hooks/use-exams";
 import { useProjects } from "@/hooks/use-projects";
+import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
 import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
-import { buildWeekPlan } from "@/lib/planner/buildWeekPlan";
+import { useDailyCompletions } from "@/hooks/use-daily-completions";
+
+// Logic
+import { buildWeekPlan, WeekPlan } from "@/lib/planner/buildWeekPlan";
 
 export default function PlannerPage() {
-  const todayDate = useMemo(() => new Date(), []);
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   
-  const { tasks: deadlines, isLoading: dlLoading } = useDeadlineTasks();
-  const { upcoming: exams, loading: exLoading } = useExams();
-  const { projects, isLoading: prLoading } = useProjects();
-  const { tasks: weeklyTasks, isLoading: wkLoading } = useWeeklyTasks();
-  
-  const { completed, toggleDeadlineTask: toggle, dateKey } = useDailyCompletions(todayDate);
+  // 1. Fetching Data
+  const exams = useExams();
+  const { projects, isLoading: projectsLoading } = useProjects();
+  const { tasks: deadlines, isLoading: deadlinesLoading } = useDeadlineTasks();
+  const { tasks: weeklyTasks, isLoading: weeklyLoading } = useWeeklyTasks();
+  const completions = useDailyCompletions(new Date());
 
-  const isLoading = dlLoading || exLoading || prLoading || wkLoading;
+  // 2. State for View, Plan, and Sync Detection
+  const [view, setView] = useState<"daily" | "weekly" | "monthly">("daily");
+  const [activePlan, setActivePlan] = useState<WeekPlan | null>(null);
+  const [lastSyncedSignature, setLastSyncedSignature] = useState<string>("");
 
-  const weekPlan = useMemo(() => {
-    if (isLoading || !deadlines) return null;
-    return buildWeekPlan({
-      today: dateKey,
-      numDays: 7,
-      weeklyTasks: weeklyTasks || [],
-      deadlines: deadlines || [],
-      exams: exams || [],
-      projects: projects || [],
+  // 3. Data Signature (Detects if DB has changed since last plan generation)
+  const currentDataSignature = useMemo(() => {
+    return JSON.stringify({
+      e: exams.upcoming.length,
+      p: projects.length,
+      d: deadlines.length,
+      w: weeklyTasks.length,
     });
-  }, [isLoading, dateKey, weeklyTasks, deadlines, exams, projects]);
+  }, [exams.upcoming, projects, deadlines, weeklyTasks]);
 
-  const todayPlan = weekPlan?.days?.[0] || null;
-  const tomorrowPlan = weekPlan?.days?.[1] || null;
-
-  // 🚀 FIXED METRICS CALCULATION
-  const metrics = useMemo(() => {
-    if (!todayPlan) return { done: 0, total: 0, minsDone: 0, minsTotal: 0 };
-
-    const homework = todayPlan.homework.items.map((i: any) => ({ id: i.id, minutes: i.minutes, type: 'deadline_task' }));
-    const weekly = todayPlan.weekly.items.map((i: any) => ({ id: i.id, minutes: i.minutes, type: 'weekly_task' }));
-    const projs = todayPlan.projects.items.map((i: any) => ({ id: i.projectId, minutes: i.minutes, type: 'project' }));
-    const revision = todayPlan.revision.slots.map((s: any, idx: number) => ({ id: `${s.examId}:${idx}`, minutes: s.slotMinutes, type: 'revision' }));
-
-    const allItems = [...homework, ...weekly, ...projs, ...revision];
-
-    let itemsDoneCount = 0;
-    let minsDone = 0;
-
-    allItems.forEach(item => {
-      const key = `${item.type}:${item.id}:${dateKey}`;
-      if (completed.has(key)) {
-        itemsDoneCount++;
-        minsDone += (item.minutes || 0);
-      }
+  // 4. Strategic Plan Generation (30 Days)
+  const handleGeneratePlan = () => {
+    const newPlan = buildWeekPlan({
+      today,
+      numDays: 30, // Extended window to prevent exam cramming
+      weeklyTasks,
+      deadlines,
+      exams: exams.upcoming,
+      projects,
     });
+    setActivePlan(newPlan);
+    setLastSyncedSignature(currentDataSignature);
+  };
 
-    return {
-      done: itemsDoneCount, // Use our calculated count, not completed.size
-      total: allItems.length,
-      minsDone,
-      minsTotal: todayPlan.totalUsed || 0
-    };
-  }, [todayPlan, completed, dateKey]);
+  const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading;
+  const isDirty = isDataLoaded && activePlan && currentDataSignature !== lastSyncedSignature;
 
-  if (isLoading || !todayPlan) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
-        <p className="text-gray-500 animate-pulse">Syncing your dashboard...</p>
-      </div>
-    );
+  useEffect(() => {
+    if (isDataLoaded && !activePlan) {
+      handleGeneratePlan();
+    }
+  }, [isDataLoaded, activePlan]);
+
+  const checklistCompletions = {
+    completed: completions.completed,
+    dateKey: completions.dateKey,
+    toggle: completions.toggleDeadlineTask,
+  };
+
+  if (!isDataLoaded) {
+    return <div className="p-10 text-center text-gray-400">Syncing Roadmap...</div>;
   }
 
+  const todayPlan = activePlan?.days[0];
+
   return (
-    <main className="min-h-screen bg-[#F8FAFC] pb-12">
-      <div className="mx-auto max-w-7xl px-4 pt-8 md:px-8">
-        <DashboardHeader />
+    <main className="mx-auto max-w-[1400px] space-y-6">
+      <DashboardHeader />
 
-        <DashboardMetrics 
-          tasksCompleted={metrics.done}
-          totalTasks={metrics.total}
-          minutesCompleted={metrics.minsDone}
-          minutesPlanned={metrics.minsTotal}
-          upcomingExams={exams?.length || 0}
-          nextExamLabel={exams?.[0]?.subject ?? undefined}
-        />
-
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-          <div className="lg:col-span-8">
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-bold text-gray-900 mb-6 border-b pb-4">Today's Focus</h2>
-              
-              <DailyChecklist 
-                day={todayPlan} 
-                completions={{ 
-                  completed, 
-                  toggle, 
-                  dateKey 
-                }} 
-              />
-            </div>
+      {/* ⚠️ Sync Warning Banner */}
+      {isDirty && (
+        <div className="flex items-center justify-between rounded-lg bg-amber-50 border border-amber-200 p-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2 text-amber-800 text-sm font-medium">
+            <span>⚠️</span>
+            Tasks have changed. Regenerate to update your roadmap.
           </div>
-
-          <div className="lg:col-span-4 space-y-6">
-            {tomorrowPlan && <TomorrowChecklist day={tomorrowPlan} />}
-            <ComingUp />
-          </div>
+          <button onClick={handleGeneratePlan} className="text-xs font-bold text-amber-700 hover:underline">
+            REFRESH PLAN
+          </button>
         </div>
+      )}
+
+      {/* 🎛️ Control Bar: The 3-Way View Switcher */}
+      <div className="flex items-center justify-between border-b pb-4">
+        <div className="inline-flex rounded-lg bg-gray-100 p-1">
+          <button
+            onClick={() => setView("daily")}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
+              view === "daily" ? "bg-white shadow-sm text-blue-600" : "text-gray-500"
+            }`}
+          >
+            Daily Focus
+          </button>
+          <button
+            onClick={() => setView("weekly")}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
+              view === "weekly" ? "bg-white shadow-sm text-blue-600" : "text-gray-500"
+            }`}
+          >
+            Weekly Grid
+          </button>
+          <button
+            onClick={() => setView("monthly")}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
+              view === "monthly" ? "bg-white shadow-sm text-blue-600" : "text-gray-500"
+            }`}
+          >
+            Monthly Roadmap
+          </button>
+        </div>
+
+        <button
+          onClick={handleGeneratePlan}
+          className={`px-4 py-2 text-sm font-semibold rounded-lg border transition-all ${
+            isDirty ? "bg-blue-600 text-white border-blue-700 shadow-md" : "bg-blue-50 text-blue-700 border-blue-200"
+          }`}
+        >
+          🔄 Regenerate Plan
+        </button>
       </div>
+
+      {/* 📊 Metrics (Only show in Daily View to keep Weekly/Monthly clean) */}
+      {view === "daily" && (
+        <DashboardMetrics
+          tasksCompleted={completions.completed.size}
+          totalTasks={(todayPlan?.weekly.items.length ?? 0) + (todayPlan?.homework.items.length ?? 0) + (todayPlan?.revision.slots.length ?? 0)}
+          minutesCompleted={0}
+          minutesPlanned={todayPlan?.totalUsed ?? 0}
+          upcomingExams={exams.upcoming.length}
+          nextExamLabel={exams.upcoming[0]?.subject ?? undefined}
+        />
+      )}
+
+      {/* 🖼️ The Main Content Area */}
+      {activePlan && (
+        <div className={`grid grid-cols-1 gap-8 ${view === "daily" ? "lg:grid-cols-3" : "grid-cols-1"}`}>
+          
+          <div className={`${view === "daily" ? "lg:col-span-2" : "col-span-1"}`}>
+            {/* 1. Daily View */}
+            {view === "daily" && (
+              <div className="space-y-6">
+                <h2 className="text-xl font-bold text-gray-800">Today's Focus</h2>
+                <DailyChecklist day={todayPlan!} completions={checklistCompletions} />
+              </div>
+            )}
+
+            {/* 2. Weekly View (Full Width) */}
+            {view === "weekly" && (
+              <div className="space-y-6">
+                <h2 className="text-xl font-bold text-gray-800">Weekly Strategy</h2>
+                <WeeklyView plan={activePlan} />
+              </div>
+            )}
+
+            {/* 3. Monthly View (Full Width / Heatmap) */}
+            {view === "monthly" && (
+              <div className="space-y-6">
+                <h2 className="text-xl font-bold text-gray-800">Monthly Roadmap</h2>
+                <MonthView plan={activePlan} />
+              </div>
+            )}
+          </div>
+
+          {/* 📋 Sidebar (Only shows in Daily View) */}
+          {view === "daily" && (
+            <aside className="space-y-8">
+              <TomorrowChecklist day={activePlan.days[1]} />
+              <ComingUp />
+            </aside>
+          )}
+        </div>
+      )}
     </main>
   );
 }
