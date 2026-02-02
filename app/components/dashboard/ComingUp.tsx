@@ -1,71 +1,86 @@
 "use client";
 
-import { useExams } from "@/hooks/use-exams";
-import { useProjects } from "@/hooks/use-projects";
+import React from "react";
 
-function daysFromTomorrow(date: Date) {
+interface ComingUpProps {
+  // We use specific types or 'any[]' to match the frozen data from the parent
+  deadlines: any[]; 
+  exams: any[];
+}
+
+function daysFromTomorrow(dateStr: string) {
+  const date = new Date(dateStr);
   const base = new Date();
   base.setDate(base.getDate() + 1);
   base.setHours(0, 0, 0, 0);
 
   date.setHours(0, 0, 0, 0);
 
-  return Math.round(
+  const diff = Math.round(
     (date.getTime() - base.getTime()) / (1000 * 60 * 60 * 24)
   );
+  return diff;
 }
 
-export function ComingUp() {
-  const exams = useExams();
-  const { projects } = useProjects();
-
+export function ComingUp({ deadlines, exams }: ComingUpProps) {
   const items: {
     id: string;
     label: string;
     meta: string;
   }[] = [];
 
-  exams.upcoming.forEach(exam => {
-    const d = daysFromTomorrow(new Date(exam.date));
-    if (d >= 1 && d <= 7) {
+  // 1. Process Exams from Props
+  exams.forEach(exam => {
+    const d = daysFromTomorrow(exam.date);
+    // Show items happening between 1 and 14 days from tomorrow
+    if (d >= 1 && d <= 14) {
       items.push({
         id: `exam-${exam.id}`,
-        label: `${exam.subject} exam`,
-        meta: `In ${d} days`,
+        label: `${exam.subject} Exam`,
+        meta: d === 1 ? "In 1 day" : `In ${d} days`,
       });
     }
   });
 
-  projects
-    .filter(p => p.status === "active" && p.due_date)
-    .forEach(project => {
-      const d = daysFromTomorrow(new Date(project.due_date));
-      if (d >= 1 && d <= 7) {
-        items.push({
-          id: `project-${project.id}`,
-          label: project.name,
-          meta: `Due in ${d} days`,
-        });
-      }
-    });
+  // 2. Process Deadlines/Homework from Props
+  deadlines.forEach(task => {
+    const d = daysFromTomorrow(task.dueDate || task.due_date);
+    if (d >= 1 && d <= 14) {
+      items.push({
+        id: `task-${task.id}`,
+        label: task.name,
+        meta: d === 1 ? "Due tomorrow" : `Due in ${d} days`,
+      });
+    }
+  });
+
+  // Sort items by urgency (days remaining)
+  items.sort((a, b) => {
+    const extractDays = (s: string) => parseInt(s.replace(/\D/g, "")) || 0;
+    return extractDays(a.meta) - extractDays(b.meta);
+  });
 
   return (
-    <div className="rounded-xl border bg-white p-4">
-      <h3 className="mb-3 text-sm font-semibold">Coming up</h3>
+    <div className="rounded-xl border bg-white p-5 shadow-sm">
+      <h3 className="mb-4 text-xs font-black uppercase tracking-widest text-gray-400">
+        Coming Up
+      </h3>
 
       {items.length === 0 ? (
-        <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
-          Nothing urgent after tomorrow.
+        <div className="rounded-lg border border-dashed bg-gray-50/50 p-4 text-center text-xs text-gray-400">
+          Your schedule looks clear for the next two weeks.
         </div>
       ) : (
         <div className="space-y-2">
           {items.map(item => (
             <div
               key={item.id}
-              className="flex justify-between rounded-lg border px-3 py-2 text-sm"
+              className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-3 py-2.5 text-sm transition-hover hover:border-blue-100"
             >
-              <span>{item.label}</span>
-              <span className="text-gray-500">{item.meta}</span>
+              <span className="font-medium text-gray-700">{item.label}</span>
+              <span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded">
+                {item.meta.toUpperCase()}
+              </span>
             </div>
           ))}
         </div>

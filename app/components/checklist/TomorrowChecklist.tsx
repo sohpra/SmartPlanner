@@ -1,107 +1,39 @@
 "use client";
 
-import type { DayPlan } from "@/lib/planner/buildWeekPlan";
+import { DayPlan } from "@/lib/planner/buildWeekPlan";
 
-/* ================================
-   Helpers
-================================ */
-
-function formatDate(date: string) {
-  const d = new Date(date + "T00:00:00");
-  return d.toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "2-digit",
-    month: "2-digit",
-  });
-}
-
-/* ================================
-   Types
-================================ */
-
-type Props = {
-  day: DayPlan;
-};
-
-/* ================================
-   Component
-================================ */
-
-export function TomorrowChecklist({ day }: Props) {
-  const hasAnything =
-    day.weekly.items.length > 0 ||
-    day.homework.items.length > 0 ||
-    day.projects.items.length > 0 ||
-    day.revision.slots.length > 0;
+export function TomorrowChecklist({ day }: { day: DayPlan }) {
+  const totalItems = day.homework.items.length + day.weekly.items.length + day.revision.slots.length;
 
   return (
-    <div className="rounded-xl border bg-white p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Tomorrow</h3>
-        <span className="text-sm text-gray-500">
-          {formatDate(day.date)}
+    <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="font-bold text-gray-800">Tomorrow</h3>
+        <span className="text-xs text-gray-400 font-medium">
+          {new Date(day.date + "T00:00:00").toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' })}
         </span>
       </div>
 
-      {!hasAnything && (
-        <div className="text-sm text-gray-500">
-          Nothing scheduled yet.
-        </div>
-      )}
-
-      {/* WEEKLY */}
-      {day.weekly.items.map((t, i) => (
-        <Item
-          key={`weekly:${t.id}:${day.date}:${i}`}
-          label={`${t.name} · ${t.minutes} mins`}
-        />
-      ))}
-
-      {/* HOMEWORK */}
-      {day.homework.items.map((t, i) => (
-        <Item
-          key={`deadline:${t.id}:${day.date}:${i}`}
-          label={`${t.name} · ${t.minutes} mins`}
-          meta={`Due ${formatDate(t.dueDate)}`}
-        />
-      ))}
-
-      {/* PROJECTS */}
-      {day.projects.items.map((p, i) => (
-        <Item
-          key={`project:${p.projectId}:${day.date}:${i}`}
-          label={`${p.name} · ${p.minutes} mins`}
-        />
-      ))}
-
-      {/* REVISION */}
-      {day.revision.slots.map((s, i) => (
-        <Item
-          key={`revision:${s.examId}:${day.date}:${i}`}
-          label={`${s.label} · ${s.slotMinutes} mins`}
-        />
-      ))}
-    </div>
-  );
-}
-
-/* ================================
-   Small helper
-================================ */
-
-function Item({
-  label,
-  meta,
-}: {
-  label: string;
-  meta?: string;
-}) {
-  return (
-    <div className="rounded-lg border px-3 py-2 text-sm">
-      <div>{label}</div>
-      {meta && (
-        <div className="text-xs text-gray-400">{meta}</div>
-      )}
+      <div className="space-y-3">
+        {totalItems === 0 ? (
+          <p className="text-sm text-gray-400 italic">Clear schedule!</p>
+        ) : (
+          <>
+            {day.homework.items.map(item => (
+              <div key={item.id} className="p-3 bg-gray-50 rounded-lg text-sm border border-gray-100">
+                <p className="font-semibold text-gray-700 truncate">{item.name}</p>
+                <p className="text-[10px] text-gray-400">{item.minutes} mins</p>
+              </div>
+            ))}
+            {day.revision.slots.map((slot, i) => (
+              <div key={i} className="p-3 bg-blue-50/50 rounded-lg text-sm border border-blue-100">
+                <p className="font-semibold text-blue-700 truncate">{slot.subject} Revision</p>
+                <p className="text-[10px] text-blue-400">{slot.slotMinutes} mins</p>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
     </div>
   );
 }
