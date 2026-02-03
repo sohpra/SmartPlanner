@@ -58,41 +58,42 @@ export function buildWeekPlan({
   const orderedDeadlines = [...deadlines].sort((a, b) => daysBetween(today, a.due_date) - daysBetween(today, b.due_date));
   
  // Inside buildWeekPlan.ts
+// 2. Homework Allocation (Earliest Full Slot Logic)
 for (const task of orderedDeadlines) {
+  // Find all available days before the due date
   const candidates = windowDates.filter(d => d < task.due_date);
   if (candidates.length === 0) continue;
 
-  const isLarge = task.estimated_minutes >= 60;
-  if (isLarge) {
-    const target = candidates[candidates.length - 1];
-    // CRITICAL: Only add if this is the SPECIFIC target day
-    homeworkItems[target].push({ 
+  let assigned = false;
+
+  // Search for the EARLIEST day that can fit the WHOLE task
+  for (const date of candidates) {
+    if (remainingCap[date] >= task.estimated_minutes) {
+      homeworkItems[date].push({ 
+        id: task.id, 
+        name: task.name, 
+        subject: task.subject, 
+        dueDate: task.due_date, 
+        minutes: task.estimated_minutes 
+      });
+      remainingCap[date] -= task.estimated_minutes;
+      assigned = true;
+      break; // Task is fully placed, stop searching
+    }
+  }
+
+  // FALLBACK: If no single day fits it (unlikely with small tasks), 
+  // place it on the latest possible day to avoid losing the task.
+  if (!assigned) {
+    const latestDate = candidates[candidates.length - 1];
+    homeworkItems[latestDate].push({ 
       id: task.id, 
       name: task.name, 
       subject: task.subject, 
       dueDate: task.due_date, 
       minutes: task.estimated_minutes 
     });
-    remainingCap[target] -= task.estimated_minutes;
-  } else {
-    let rem = task.estimated_minutes;
-    for (const d of candidates) {
-      if (rem <= 0) break;
-      const isLast = d === candidates[candidates.length - 1];
-      // Only consume capacity on days that have it, or force on the last day
-      if (remainingCap[d] > 0 || isLast) {
-        const used = isLast ? rem : Math.min(remainingCap[d], rem);
-        homeworkItems[d].push({ 
-          id: task.id, 
-          name: task.name, 
-          subject: task.subject, 
-          dueDate: task.due_date, 
-          minutes: used 
-        });
-        remainingCap[d] -= used;
-        rem -= used;
-      }
-    }
+    remainingCap[latestDate] -= task.estimated_minutes;
   }
 }
 

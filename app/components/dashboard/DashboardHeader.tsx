@@ -27,11 +27,8 @@ export function DashboardHeader() {
     <div className="mb-8 flex items-center justify-between">
       <div>
         <h1 className="text-2xl font-semibold">
-          Welcome back, Rehan 👋
+          Welcome back, Rehan
         </h1>
-        <p className="text-sm text-gray-500">
-          Here’s what’s on your plate for today.
-        </p>
       </div>
 
       <div className="text-right text-sm text-gray-500">
