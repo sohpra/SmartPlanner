@@ -6,7 +6,7 @@ import { AddTaskModal } from "../components/tasks/AddTaskModal";
 import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
 import { useProjects } from "@/hooks/use-projects";
 import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
-import { Trash2, Plus, Repeat, Calendar, Rocket, Clock } from "lucide-react";
+import { Trash2, Plus, Repeat, Calendar, Rocket, Clock, Tag } from "lucide-react";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -50,7 +50,7 @@ export default function TasksPage() {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-gray-100 pb-10">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-1">Operational Inventory</p>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tighter italic">Task Registry</h1>
+          <h1 className="text-4xl font-black text-slate-900 tracking-tighter italic text-balance">Task Register</h1>
         </div>
         <button
           onClick={() => setOpenAddTask(true)}
@@ -62,19 +62,30 @@ export default function TasksPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         
-        {/* ⬅️ LEFT COLUMN (7/12): PRIMARY (Homework & Projects) */}
+        {/* ⬅️ LEFT COLUMN: PRIMARY (Homework & Projects) */}
         <div className="lg:col-span-7 space-y-12">
           
           {/* Homework & Deadlines Section */}
           <section className="space-y-6">
-            {/* ⬅️ LEFT COLUMN: HOMEWORK & DEADLINES */}
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-50 rounded-xl"><Calendar className="w-4 h-4 text-blue-600" /></div>
+              <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Homework & Deadlines</h2>
+            </div>
+
             <div className="space-y-4">
               {deadlineTasks.map((task) => (
                 <div key={task.id} className="group flex items-center justify-between p-6 bg-white border-2 border-slate-100 rounded-[2rem] hover:border-blue-500/20 hover:bg-blue-50/5 transition-all duration-300">
                   <div className="space-y-1">
-                    {/* 🎯 TONED DOWN: Sentence Case, slightly smaller, still bold italic */}
-                    <div className="text-xl font-black italic tracking-tight text-slate-800 leading-tight">
-                      {task.name}
+                    <div className="flex items-center gap-3">
+                      <div className="text-xl font-black italic tracking-tight text-slate-800 leading-tight">
+                        {task.name}
+                      </div>
+                      {/* ✅ SUBJECT BADGE ADDED */}
+                      {task.subject && (
+                        <span className="text-[9px] font-black uppercase tracking-widest bg-blue-100 text-blue-600 px-2 py-1 rounded-lg">
+                          {task.subject}
+                        </span>
+                      )}
                     </div>
                     
                     <div className="flex items-center gap-3 text-slate-400 pt-1">
@@ -93,8 +104,6 @@ export default function TasksPage() {
                 </div>
               ))}
             </div>
-            
-            
           </section>
 
           {/* Long-term Projects Section */}
@@ -118,7 +127,7 @@ export default function TasksPage() {
           </section>
         </div>
 
-        {/* ➡️ RIGHT COLUMN (5/12): SECONDARY (Weekly Routine) */}
+        {/* ➡️ RIGHT COLUMN: SECONDARY (Weekly Routine) */}
         <aside className="lg:col-span-5">
           <div className="bg-gray-50/50 rounded-[2.5rem] p-8 border border-gray-100 sticky top-8">
             <div className="flex items-center gap-3 mb-8">
@@ -126,10 +135,18 @@ export default function TasksPage() {
               <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Weekly Routine</h2>
             </div>
             <div className="space-y-3">
-              {weeklyTasks.map((task) => (
+              {weeklyTasks.map((task: any) => (
                 <div key={task.id} className="group flex items-center justify-between p-5 bg-white border border-gray-100 rounded-2xl hover:shadow-lg transition-all">
                   <div>
-                    <div className="text-sm font-bold text-slate-900 tracking-tight">{task.name}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-bold text-slate-900 tracking-tight">{task.name}</div>
+                      {/* ✅ ACTIVITY TYPE LABEL ADDED */}
+                      {task.task_type && (
+                      <span className="text-[8px] font-black uppercase text-indigo-400 border border-indigo-100 px-1.5 rounded">
+                        {task.task_type}
+                      </span>
+                    )}
+                    </div>
                     <div className="text-[9px] font-black text-indigo-500 uppercase mt-1 tracking-widest opacity-70">
                       {DAYS[task.day_of_week]} • {task.duration_minutes}M
                     </div>

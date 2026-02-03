@@ -1,101 +1,189 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { useSubjects } from "@/hooks/use-subjects";
-import { X, Zap, Target, Clock } from "lucide-react";
+import { X, BookOpen, Clock } from "lucide-react";
 
-export function AddTaskModal({ open, onClose }: any) {
-  const { subjects, loading: subjectsLoading } = useSubjects();
-  const [taskType, setTaskType] = useState<"weekly" | "deadline" | "project">("weekly");
-  const [name, setName] = useState("");
-  const [subjectText, setSubjectText] = useState("");
-  const [dayOfWeek, setDayOfWeek] = useState(1);
-  const [durationMinutes, setDurationMinutes] = useState(30);
-  const [dueDate, setDueDate] = useState("");
-  const [estimatedMinutes, setEstimatedMinutes] = useState(300);
+type TabType = "homework" | "project" | "weekly";
 
-  useEffect(() => { if (open) setName(""); }, [open]);
+export function AddTaskModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [activeTab, setActiveTab] = useState<TabType>("homework");
+  const [title, setTitle] = useState("");
+  const [load, setLoad] = useState("30");
+  const [day, setDay] = useState("1");
+  const [dueDate, setDueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [subjectId, setSubjectId] = useState("");
+  
+  // Defaulting to "Regular Study Slot" makes it effectively optional for the user
+  const [activityType, setActivityType] = useState("Regular Study Slot");
+  const [subjects, setSubjects] = useState<{ id: string; name: string }[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    async function fetchSubjects() {
+      const { data } = await supabase.from("subjects").select("id, name").order("name");
+      if (data) setSubjects(data);
+    }
+    if (open) fetchSubjects();
+  }, [open]);
+
+  const handleSubmit = async () => {
+    if (!title) return alert("Please enter an objective name");
+    setIsSubmitting(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user found");
+
+      let error;
+
+      if (activeTab === "homework") {
+        ({ error } = await supabase.from("deadline_tasks").insert([{
+          name: title,
+          estimated_minutes: parseInt(load),
+          due_date: dueDate,
+          subject_id: subjectId || null,
+          user_id: user.id,
+          status: 'active'
+        }]));
+      } else if (activeTab === "weekly") {
+        ({ error } = await supabase.from("recurring_tasks").insert([{
+          name: title,
+          duration_minutes: parseInt(load),
+          day_of_week: parseInt(day),
+          task_type: activityType || "Regular Study Slot", // Ensures a value hits the DB
+          user_id: user.id
+        }]));
+      } else if (activeTab === "project") {
+        ({ error } = await supabase.from("projects").insert([{
+          name: title,
+          user_id: user.id,
+          estimated_minutes: parseInt(load) || 60,
+          due_date: new Date().toISOString().split('T')[0],
+          status: 'active'
+        }]));
+      }
+
+      if (error) throw error;
+      onClose();
+      window.location.reload();
+    } catch (err: any) {
+      alert("Database Error: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   if (!open) return null;
 
-  async function handleSubmit() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const payload: any = { user_id: user.id, name };
-    let table = "";
-
-    if (taskType === "weekly") {
-      table = "recurring_tasks";
-      Object.assign(payload, { subject: subjectText, day_of_week: dayOfWeek, duration_minutes: durationMinutes, task_type: "homework" });
-    } else if (taskType === "deadline") {
-      table = "deadline_tasks";
-      Object.assign(payload, { due_date: dueDate, estimated_minutes: durationMinutes });
-    } else {
-      table = "projects";
-      Object.assign(payload, { due_date: dueDate, estimated_minutes: estimatedMinutes, status: "active", subject: subjectText });
-    }
-
-    const { error } = await supabase.from(table).insert(payload);
-    if (!error) { onClose(); window.location.reload(); }
-  }
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="w-full max-w-xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-        <div className="p-8 space-y-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="bg-slate-900 p-2.5 rounded-2xl rotate-3 text-white"><Zap className="w-5 h-5 fill-current" /></div>
-              <h2 className="text-2xl font-black italic tracking-tighter">Initialize Task</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 text-slate-900">
+      <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+        
+        {/* Header */}
+        <div className="p-8 pb-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-slate-900 p-2 rounded-xl text-white">
+              <BookOpen className="w-5 h-5" />
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X className="w-5 h-5" /></button>
+            <h2 className="text-2xl font-black italic tracking-tighter uppercase">Initialize Task</h2>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-50 rounded-full transition-colors">
+            <X className="w-5 h-5 text-slate-400" />
+          </button>
+        </div>
+
+        {/* Tab Selection */}
+        <div className="px-8 mb-6">
+          <div className="flex p-1 bg-slate-50 rounded-2xl border border-slate-100">
+            {(["homework", "project", "weekly"] as TabType[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${
+                  activeTab === tab ? "bg-slate-900 text-white shadow-lg" : "text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-8 pb-10 space-y-5">
+          {/* Conditional Fields: Homework Subject */}
+          {activeTab === "homework" && (
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Subject (Optional)</label>
+              <select 
+                value={subjectId} 
+                onChange={(e) => setSubjectId(e.target.value)}
+                className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold focus:border-blue-500 outline-none transition-all appearance-none"
+              >
+                <option value="">Select Subject...</option>
+                {subjects.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+              </select>
+            </div>
+          )}
+
+          {/* Conditional Fields: Weekly Activity Type */}
+          {activeTab === "weekly" && (
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Type (Optional)</label>
+              <select 
+                value={activityType} 
+                onChange={(e) => setActivityType(e.target.value)}
+                className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold focus:border-blue-500 outline-none transition-all appearance-none"
+              >
+                <option value="Regular Study Slot">Regular Study Slot</option>
+                <option value="club">Club</option>
+                <option value="music">Music</option>
+              </select>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Objective Name</label>
+            <input
+              placeholder="Enter title..."
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold focus:border-blue-500 outline-none transition-all placeholder:text-slate-300"
+            />
           </div>
 
-          <div className="space-y-6">
-            <div className="grid grid-cols-3 gap-2">
-              {(["weekly", "deadline", "project"] as const).map((t) => (
-                <button key={t} onClick={() => setTaskType(t)} className={`py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest border-2 transition-all ${taskType === t ? 'border-slate-900 bg-slate-900 text-white' : 'border-gray-50 bg-gray-50 text-gray-400'}`}>
-                  {t}
-                </button>
-              ))}
-            </div>
+          <div className="grid grid-cols-2 gap-4">
+            {activeTab === "weekly" ? (
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Day</label>
+                <select value={day} onChange={(e) => setDay(e.target.value)} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold focus:border-blue-500 outline-none appearance-none">
+                  <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
+                  <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Due Date</label>
+                <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold focus:border-blue-500 outline-none" />
+              </div>
+            )}
 
-            <div className="space-y-1">
-              <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest ml-1">Objective Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter task title..." className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 text-sm font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-blue-600" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-               {taskType === "weekly" ? (
-                 <div className="space-y-1">
-                   <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest ml-1">Day</label>
-                   <select value={dayOfWeek} onChange={(e) => setDayOfWeek(Number(e.target.value))} className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold">
-                     <option value={1}>Monday</option><option value={2}>Tuesday</option><option value={3}>Wednesday</option>
-                     <option value={4}>Thursday</option><option value={5}>Friday</option><option value={6}>Saturday</option><option value={0}>Sunday</option>
-                   </select>
-                 </div>
-               ) : (
-                 <div className="space-y-1">
-                   <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest ml-1">Deadline Date</label>
-                   <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold" />
-                 </div>
-               )}
-
-               <div className="space-y-1">
-                 <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest ml-1">Estimated Load</label>
-                 <div className="relative">
-                   <input type="number" value={taskType === "project" ? estimatedMinutes : durationMinutes} onChange={(e) => taskType === "project" ? setEstimatedMinutes(Number(e.target.value)) : setDurationMinutes(Number(e.target.value))} className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold" />
-                   <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">MINS</span>
-                 </div>
-               </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1 text-right block mr-1">Load (Mins)</label>
+              <div className="relative">
+                <input type="number" value={load} onChange={(e) => setLoad(e.target.value)} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold text-center focus:border-blue-500 outline-none" />
+                <Clock className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
+              </div>
             </div>
           </div>
 
-          <div className="flex gap-4 pt-4">
-            <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 hover:text-slate-900 transition-colors">Cancel</button>
-            <button onClick={handleSubmit} disabled={!name} className="flex-[2] bg-blue-600 text-white rounded-2xl py-4 text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-blue-200 hover:bg-slate-900 disabled:opacity-30 transition-all">Add Objective</button>
-          </div>
+          <button 
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest py-5 rounded-[1.5rem] shadow-xl shadow-blue-100 transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            {isSubmitting ? "Syncing..." : "Add Objective"}
+          </button>
         </div>
       </div>
     </div>

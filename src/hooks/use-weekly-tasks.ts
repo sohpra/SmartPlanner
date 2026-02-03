@@ -18,10 +18,10 @@ export function useWeeklyTasks() {
     const fetch = async () => {
       setIsLoading(true);
 
-      const { data, error } = await supabase
-        .from("recurring_tasks")
-        .select("id,name,day_of_week,duration_minutes")
-        .order("day_of_week", { ascending: true });
+    const { data, error } = await supabase
+      .from("recurring_tasks")
+      .select("id, name, day_of_week, duration_minutes, task_type") // Added task_type here
+      .order("day_of_week", { ascending: true });
 
       if (error) {
         console.error("Failed to fetch weekly tasks", error);
