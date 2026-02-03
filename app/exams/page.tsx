@@ -37,8 +37,8 @@ export default function ExamsPage() {
       {/* 📋 Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-gray-100 pb-8">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-1">Strategic Overview</p>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tighter italic text-balance">Exam Briefings</h1>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-1">Inventory</p>
+          <h1 className="text-4xl font-black text-slate-900 tracking-tighter italic text-balance">Exam Register</h1>
         </div>
 
         <button

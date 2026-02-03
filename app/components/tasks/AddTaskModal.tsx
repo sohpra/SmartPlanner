@@ -86,7 +86,7 @@ export function AddTaskModal({ open, onClose }: { open: boolean; onClose: () => 
             <div className="bg-slate-900 p-2 rounded-xl text-white">
               <BookOpen className="w-5 h-5" />
             </div>
-            <h2 className="text-2xl font-black italic tracking-tighter uppercase">Initialize Task</h2>
+              <h2 className="text-2xl font-black italic tracking-tighter">Add New Task</h2>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-50 rounded-full transition-colors">
             <X className="w-5 h-5 text-slate-400" />

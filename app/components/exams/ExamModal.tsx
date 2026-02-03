@@ -51,7 +51,7 @@ export function ExamModal({ open, onClose, onAdded }: any) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="bg-blue-600 p-2.5 rounded-2xl rotate-3"><Sparkles className="w-5 h-5 text-white" /></div>
-              <h2 className="text-2xl font-black italic tracking-tighter">New Exam</h2>
+              <h2 className="text-2xl font-black italic tracking-tighter">Add New Exam</h2>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X className="w-5 h-5" /></button>
           </div>
