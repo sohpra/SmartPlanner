@@ -104,24 +104,45 @@ export default function PlannerPage() {
         <div className={`${view === "daily" ? "lg:col-span-2" : "col-span-1"}`}>
           {view === "daily" && (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <DashboardMetrics
-                tasksCompleted={completions.completed.size}
-                totalTasks={todayPlan.weekly.items.length + todayPlan.homework.items.length + todayPlan.revision.slots.length}
-                minutesCompleted={0} // Future: Link this to actual session timers
-                minutesPlanned={todayPlan.totalUsed}
-                upcomingExams={exams.upcoming.length}
-                nextExamLabel={exams.upcoming[0]?.subject ?? undefined}
-              />
+              
+              {/* Simplified Top Metrics Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-6 bg-white rounded-2xl border border-gray-200 shadow-sm">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Tasks completed</p>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-4xl font-black text-gray-900">{completions.completed.size}</p>
+                    <p className="text-lg font-bold text-gray-400">/ {todayPlan.weekly.items.length + todayPlan.homework.items.length + todayPlan.revision.slots.length}</p>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-white rounded-2xl border border-gray-200 shadow-sm">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Study time today</p>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-4xl font-black text-gray-900">
+                      {Math.floor(todayPlan.totalUsed / 60)}h {todayPlan.totalUsed % 60}m
+                    </p>
+                  </div>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase mt-1">Planned allocation</p>
+                </div>
+              </div>
               
               <section>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-2xl font-black text-gray-900">Today's Focus</h2>
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-black text-gray-900 tracking-tight">Today's Focus</h2>
                   {todayPlan.totalUsed > todayPlan.baseCapacity && (
-                    <span className="bg-red-100 text-red-700 text-[10px] font-black px-2 py-1 rounded-full uppercase">
-                      Overloaded (+{todayPlan.totalUsed - todayPlan.baseCapacity}m)
-                    </span>
+                    <div className="flex items-center gap-2 bg-red-50 border border-red-100 px-3 py-1.5 rounded-full">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                      </span>
+                      <span className="text-red-700 text-[10px] font-black uppercase tracking-wider">
+                        Overloaded (+{todayPlan.totalUsed - todayPlan.baseCapacity}m)
+                      </span>
+                    </div>
                   )}
                 </div>
+                
+                {/* Unified Checklist Component */}
                 <DailyChecklist 
                   day={todayPlan} 
                   completions={checklistCompletions} 
@@ -143,7 +164,7 @@ export default function PlannerPage() {
           )}
         </div>
 
-        {/* 📋 Sidebar - Only visible in Daily View */}
+        {/* 📋 Sidebar - Clean Props-based approach */}
         {view === "daily" && (
           <aside className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
             <TomorrowChecklist day={tomorrowPlan} />

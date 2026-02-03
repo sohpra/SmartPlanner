@@ -3,35 +3,40 @@
 import { DayPlan } from "@/lib/planner/buildWeekPlan";
 
 export function TomorrowChecklist({ day }: { day: DayPlan }) {
-  const totalItems = day.homework.items.length + day.weekly.items.length + day.revision.slots.length;
+  const items = [
+    ...day.homework.items.map(i => ({ ...i, type: 'Homework' })),
+    ...day.revision.slots.map(s => ({ ...s, name: s.label, type: 'Revision' })),
+    ...day.weekly.items.map(i => ({ ...i, type: 'Weekly' }))
+  ];
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="font-bold text-gray-800">Tomorrow</h3>
-        <span className="text-xs text-gray-400 font-medium">
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="font-black text-gray-900 tracking-tight">Tomorrow</h3>
+        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
           {new Date(day.date + "T00:00:00").toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' })}
         </span>
       </div>
 
       <div className="space-y-3">
-        {totalItems === 0 ? (
-          <p className="text-sm text-gray-400 italic">Clear schedule!</p>
+        {items.length === 0 ? (
+          <p className="text-xs text-gray-400 italic text-center py-4">Clear schedule tomorrow!</p>
         ) : (
-          <>
-            {day.homework.items.map(item => (
-              <div key={item.id} className="p-3 bg-gray-50 rounded-lg text-sm border border-gray-100">
-                <p className="font-semibold text-gray-700 truncate">{item.name}</p>
-                <p className="text-[10px] text-gray-400">{item.minutes} mins</p>
+          items.map((item, idx) => (
+            <div key={idx} className="p-4 bg-gray-50/50 rounded-xl border border-gray-100">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-bold text-gray-700 truncate">{item.name}</p>
+                {item.subject && (
+                  <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded uppercase">
+                    {item.subject}
+                  </span>
+                )}
               </div>
-            ))}
-            {day.revision.slots.map((slot, i) => (
-              <div key={i} className="p-3 bg-blue-50/50 rounded-lg text-sm border border-blue-100">
-                <p className="font-semibold text-blue-700 truncate">{slot.subject} Revision</p>
-                <p className="text-[10px] text-blue-400">{slot.slotMinutes} mins</p>
-              </div>
-            ))}
-          </>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
+                {item.minutes} mins • {item.type}
+              </p>
+            </div>
+          ))
         )}
       </div>
     </div>

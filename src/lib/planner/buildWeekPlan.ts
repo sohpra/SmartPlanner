@@ -43,7 +43,12 @@ export function buildWeekPlan({
     const dow = new Date(d + "T00:00:00").getDay();
     weeklyItems[d] = weeklyTasks
       .filter((t: any) => t.day_of_week === dow)
-      .map((t: any) => ({ id: t.id, name: t.name, minutes: t.duration_minutes }));
+      .map((t: any) => ({ 
+        id: t.id, 
+        name: t.name, 
+        subject: t.subject, // ENSURE THIS LINE IS HERE
+        minutes: t.duration_minutes 
+      }));
     
     const weeklyMins = weeklyItems[d].reduce((sum, item) => sum + item.minutes, 0);
     remainingCap[d] -= weeklyMins;
@@ -60,8 +65,14 @@ export function buildWeekPlan({
     if (isLarge) {
       // Force into the latest possible day before due date (Sticky)
       const target = candidates[candidates.length - 1];
-      homeworkItems[target].push({ id: task.id, name: task.name, dueDate: task.due_date, minutes: task.estimated_minutes });
-      remainingCap[target] -= task.estimated_minutes;
+      homeworkItems[target].push({ 
+          id: task.id, 
+          name: task.name, 
+          subject: task.subject, // Make sure this is included!
+          dueDate: task.due_date, 
+          minutes: task.estimated_minutes 
+        });      
+        remainingCap[target] -= task.estimated_minutes;
     } else {
       // Small tasks fill gaps
       let rem = task.estimated_minutes;
