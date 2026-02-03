@@ -138,8 +138,14 @@ export default function PlannerPage() {
           )}
 
           {view === "weekly" && <WeeklyView plan={activePlan} />}
-          {view === "monthly" && <MonthView plan={activePlan} />}
-        </div>
+          {view === "monthly" && (
+            <MonthView 
+              plan={activePlan} 
+              exams={exams.upcoming || []} 
+              projects={projects || []} 
+            />
+          )}    
+          </div>
 
         {/* RIGHT COLUMN: 4/12 of the width on desktop */}
         {view === "daily" && (
