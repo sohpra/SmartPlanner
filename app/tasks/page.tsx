@@ -72,10 +72,12 @@ export default function TasksPage() {
         
         {/* ⬅️ LEFT COLUMN: Homework & Projects */}
         <div className="lg:col-span-7 space-y-12">
+          
+          {/* 1. Homework and Assignments */}
           <section className="space-y-6">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-blue-50 rounded-xl"><Calendar className="w-4 h-4 text-blue-600" /></div>
-              <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Homework Registry</h2>
+              <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Homework</h2>
             </div>
             <div className="space-y-4">
               {deadlineTasks.map((task) => (
@@ -96,9 +98,44 @@ export default function TasksPage() {
                       </div>
                     </div>
                   </div>
-                  <button onClick={() => deleteRow("deadline_tasks", task.id)} className="p-2 text-slate-200 hover:text-red-500 transition-all"><Trash2 className="w-4 h-4" /></button>
+                  <button onClick={() => deleteRow("deadline_tasks", task.id)} className="p-2 text-slate-200 hover:text-red-500 transition-all">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               ))}
+            </div>
+          </section>
+
+          {/* 2. Strategic Projects (THE MISSING PIECE) */}
+          <section className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-sky-50 rounded-xl"><Rocket className="w-4 h-4 text-sky-600" /></div>
+              <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Projects</h2>
+            </div>
+            <div className="space-y-4">
+              {projects.map((project) => (
+                <div key={project.id} className="group flex items-center justify-between p-6 bg-white border-2 border-slate-100 rounded-[2rem] hover:border-sky-500/20 transition-all">
+                  <div className="space-y-1">
+                    <div className="text-xl font-black italic tracking-tight text-slate-800">
+                      {project.name}
+                    </div>
+                    <div className="flex items-center gap-3 text-slate-400 pt-1 text-[9px] font-black uppercase tracking-widest">
+                      <div className="flex items-center gap-1"><Clock className="w-3 h-3" /> {project.estimated_minutes}m</div>
+                      <div className="text-sky-600 font-bold italic lowercase opacity-80">
+                        // active_initiative
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={() => deleteRow("projects", project.id)} className="p-2 text-slate-200 hover:text-red-500 transition-all">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              {projects.length === 0 && (
+                <div className="p-8 border-2 border-dashed border-slate-100 rounded-[2rem] text-center">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">No active strategic projects</p>
+                </div>
+              )}
             </div>
           </section>
         </div>
