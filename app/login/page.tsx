@@ -77,7 +77,7 @@ export default function LoginPage() {
             className="group w-full flex items-center justify-between p-2 bg-blue-600 rounded-[1.5rem] hover:bg-slate-900 transition-all duration-300 disabled:opacity-30"
           >
             <span className="pl-6 text-[10px] font-black uppercase tracking-[0.2em] text-white">
-              {loading ? "Authenticating..." : "Authorize"}
+              {loading ? "Authenticating..." : "Authorise"}
             </span>
             <div className="bg-white/20 p-4 rounded-2xl group-hover:bg-white/10">
               <ArrowRight className="w-5 h-5 text-white" />
