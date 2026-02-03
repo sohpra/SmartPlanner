@@ -59,7 +59,7 @@ export function DashboardHeader() {
           </div>
           <div className="flex items-center gap-2">
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600">
-              Strategic Roadmap
+              The Masterplan
             </p>
             <div className="flex items-center gap-1 px-2 py-0.5 bg-emerald-50 rounded-full border border-emerald-100">
               <CheckCircle2 className="w-2.5 h-2.5 text-emerald-500" />
