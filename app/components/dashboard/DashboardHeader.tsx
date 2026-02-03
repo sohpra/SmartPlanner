@@ -9,12 +9,21 @@ export function DashboardHeader() {
   const [currentTime, setCurrentTime] = useState("");
 
   useEffect(() => {
-    // 1. Handle Dynamic Name Greeting
+    // 1. Handle Dynamic Name Greeting (Updated for Metadata)
     const getUser = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (data.user?.email) {
-        const namePart = data.user.email.split('@')[0].split('.')[0];
-        setFirstName(namePart.charAt(0).toUpperCase() + namePart.slice(1));
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user) {
+        // Check metadata first (The "Rehan" check)
+        const metadataName = user.user_metadata?.first_name;
+        
+        if (metadataName) {
+          setFirstName(metadataName);
+        } else if (user.email) {
+          // Fallback to email logic
+          const namePart = user.email.split('@')[0].split('.')[0];
+          setFirstName(namePart.charAt(0).toUpperCase() + namePart.slice(1));
+        }
       }
     };
     getUser();
@@ -57,7 +66,6 @@ export function DashboardHeader() {
         </h1>
       </div>
 
-      {/* 🕒 ENHANCED TIME & DATE SECTION */}
       <div className="flex flex-col md:items-end gap-1.5 min-w-[140px]">
         <div className="flex items-center gap-2.5 text-slate-600 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100/50">
           <Clock className="w-4 h-4 text-blue-500" />
