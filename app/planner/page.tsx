@@ -29,13 +29,11 @@ export default function PlannerPage() {
   const { tasks: weeklyTasks = [], isLoading: weeklyLoading } = useWeeklyTasks();
   const completions = useDailyCompletions(new Date());
 
-  // 2. VIEW STATE
   const [view, setView] = useState<"daily" | "weekly" | "monthly">("daily");
 
-  // 3. THE DYNAMIC ENGINE
+  // 2. THE DYNAMIC ENGINE
   const activePlan = useMemo(() => {
     const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading;
-    
     if (!isDataLoaded) return null;
 
     return buildWeekPlan({
@@ -48,7 +46,6 @@ export default function PlannerPage() {
     });
   }, [today, exams.upcoming, projects, deadlines, weeklyTasks, exams.loading, projectsLoading, deadlinesLoading, weeklyLoading]);
 
-  // Loading State
   if (!activePlan) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
@@ -63,7 +60,6 @@ export default function PlannerPage() {
   const todayPlan = activePlan.days[0];
   const tomorrowPlan = activePlan.days[1];
 
-  // Completion props for the checklist
   const checklistCompletions = {
     completed: completions.completed,
     toggle: completions.toggleDeadlineTask,
@@ -71,48 +67,42 @@ export default function PlannerPage() {
   };
 
   return (
-    <main className="mx-auto max-w-[1400px] space-y-6 px-4 py-8">
+    <main className="mx-auto max-w-[1400px] px-4 py-4 md:py-8 space-y-4 md:space-y-6">
       <DashboardHeader />
 
-      {/* 🎛️ Navigation & View Switcher */}
-      <div className="flex items-center justify-between border-b pb-4">
-        <div className="inline-flex rounded-lg bg-gray-100 p-1">
+      {/* 🎛️ Responsive Navigation */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4">
+        <div className="inline-flex rounded-lg bg-gray-100 p-1 w-full sm:w-auto">
           {["daily", "weekly", "monthly"].map((v) => (
             <button
               key={v}
               onClick={() => setView(v as any)}
-              className={`px-6 py-2 text-sm font-bold rounded-md capitalize transition-all ${
-                view === v 
-                  ? "bg-white shadow-md text-blue-600 scale-105" 
-                  : "text-gray-500 hover:text-gray-700"
+              className={`flex-1 sm:flex-none px-4 py-1.5 text-xs md:text-sm font-bold rounded-md capitalize transition-all ${
+                view === v ? "bg-white shadow-sm text-blue-600" : "text-gray-500 hover:text-gray-700"
               }`}
             >
               {v}
             </button>
           ))}
         </div>
-
-        <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+        <div className="hidden sm:block text-[10px] font-bold text-gray-400 uppercase tracking-widest">
           Live Sync Active
         </div>
       </div>
 
-      {/* 📊 Metrics & Main Content */}
-      <div className={`grid grid-cols-1 gap-8 ${view === "daily" ? "lg:grid-cols-3" : "grid-cols-1"}`}>
+      {/* 📊 Main Layout Grid: Responsive column spans */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
         
-        <div className={`${view === "daily" ? "lg:col-span-2" : "col-span-1"}`}>
+        {/* LEFT COLUMN: 8/12 of the width on desktop */}
+        <div className={`${view === "daily" ? "lg:col-span-8" : "col-span-full"}`}>
           {view === "daily" && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
               
-              {/* 1. TOP HEADER: Now has "Today" and Overload badge */}
+              {/* Header */}
               <div className="flex items-center justify-between">
-                <h2 className="text-3xl font-black text-gray-900 tracking-tight">Today</h2>
+                <h2 className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight">Today</h2>
                 {todayPlan.totalUsed > todayPlan.baseCapacity && (
-                  <div className="flex items-center gap-2 bg-red-50 border border-red-100 px-3 py-1.5 rounded-full">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                    </span>
+                  <div className="flex items-center gap-2 bg-red-50 border border-red-100 px-3 py-1 rounded-full">
                     <span className="text-red-700 text-[10px] font-black uppercase tracking-wider">
                       Overloaded (+{todayPlan.totalUsed - todayPlan.baseCapacity}m)
                     </span>
@@ -120,53 +110,40 @@ export default function PlannerPage() {
                 )}
               </div>
 
-              {/* 2. METRIC CARDS: Polished Titles & Sizes */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-8 bg-white rounded-2xl border border-gray-200 shadow-sm">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Tasks completed</p>
-                  <div className="flex items-baseline gap-2">
-                    <p className="text-5xl font-black text-gray-900">{completions.completed.size}</p>
-                    <p className="text-xl font-bold text-gray-400">/ {todayPlan.weekly.items.length + todayPlan.homework.items.length + todayPlan.revision.slots.length}</p>
-                  </div>
-                </div>
-
-                <div className="p-8 bg-white rounded-2xl border border-gray-200 shadow-sm">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Planned Time</p>
-                  <div className="flex items-baseline gap-2">
-                    <p className="text-5xl font-black text-gray-900">
-                      {Math.floor(todayPlan.totalUsed / 60)}h {todayPlan.totalUsed % 60}m
+              {/* COMPACT METRIC CARDS: Reduced padding for more vertical space */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 md:p-5 bg-white rounded-xl border border-gray-200 shadow-sm">
+                  <p className="text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tasks completed</p>
+                  <div className="flex items-baseline gap-1 md:gap-2">
+                    <p className="text-2xl md:text-4xl font-black text-gray-900">{completions.completed.size}</p>
+                    <p className="text-sm md:text-lg font-bold text-gray-400">
+                      / {todayPlan.weekly.items.length + todayPlan.homework.items.length + todayPlan.revision.slots.length}
                     </p>
                   </div>
                 </div>
+
+                <div className="p-4 md:p-5 bg-white rounded-xl border border-gray-200 shadow-sm">
+                  <p className="text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Planned Time</p>
+                  <p className="text-2xl md:text-4xl font-black text-gray-900">
+                    {Math.floor(todayPlan.totalUsed / 60)}h {todayPlan.totalUsed % 60}m
+                  </p>
+                </div>
               </div>
               
-              {/* 3. CHECKLIST SECTION */}
-              <section className="pt-2">
-                <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-6">Focus Areas</h3>
-                <DailyChecklist 
-                  day={todayPlan} 
-                  completions={checklistCompletions} 
-                />
+              <section>
+                <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Focus Areas</h3>
+                <DailyChecklist day={todayPlan} completions={checklistCompletions} />
               </section>
             </div>
           )}
 
-          {view === "weekly" && (
-            <div className="animate-in fade-in zoom-in-95 duration-300">
-              <WeeklyView plan={activePlan} />
-            </div>
-          )}
-
-          {view === "monthly" && (
-            <div className="animate-in fade-in zoom-in-95 duration-300">
-              <MonthView plan={activePlan} />
-            </div>
-          )}
+          {view === "weekly" && <WeeklyView plan={activePlan} />}
+          {view === "monthly" && <MonthView plan={activePlan} />}
         </div>
 
-        {/* 📋 SIDEBAR */}
+        {/* RIGHT COLUMN: 4/12 of the width on desktop */}
         {view === "daily" && (
-          <aside className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
+          <aside className="lg:col-span-4 space-y-6 animate-in fade-in lg:slide-in-from-right-4 duration-500">
             <TomorrowChecklist day={tomorrowPlan} />
             <ComingUp projects={projects || []} exams={exams.upcoming || []} />
           </aside>
