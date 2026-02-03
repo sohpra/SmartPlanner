@@ -136,8 +136,15 @@ export default function PlannerPage() {
               </section>
             </div>
           )}
-
-          {view === "weekly" && <WeeklyView plan={activePlan} />}
+          {view === "weekly" && (
+            <div className="animate-in fade-in zoom-in-95 duration-300">
+              <WeeklyView 
+                plan={activePlan} 
+                exams={exams.upcoming || []} 
+                projects={projects || []} 
+              />
+            </div>
+          )}
           {view === "monthly" && (
             <MonthView 
               plan={activePlan} 

@@ -2,15 +2,18 @@
 
 import React, { useState, useMemo } from "react";
 import type { WeekPlan, DayPlan } from "@/lib/planner/buildWeekPlan";
-import { ChevronLeft, ChevronRight, Calendar, AlertCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 
 type Props = {
   plan: WeekPlan;
+  exams: any[];
+  projects: any[];
 };
 
-export function WeeklyView({ plan }: Props) {
+export function WeeklyView({ plan, exams, projects }: Props) {
   const [weekOffset, setWeekOffset] = useState(0);
 
+  // 1. ANCHOR TO MONDAY: Logic to ensure Monday is always Column 1
   const visibleDays = useMemo(() => {
     const today = new Date();
     const dayOfWeek = today.getDay(); 
@@ -32,7 +35,7 @@ export function WeeklyView({ plan }: Props) {
       if (planDay) {
         weekWindow.push(planDay);
       } else {
-        // TS FIX: added missing 'spare' and double-cast
+        // Skeleton for dates outside the engine window
         weekWindow.push({
           date: dateStr,
           totalUsed: 0,
@@ -52,7 +55,7 @@ export function WeeklyView({ plan }: Props) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      {/* 🧭 Header */}
+      {/* 🧭 Header with Navigation */}
       <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
@@ -72,16 +75,24 @@ export function WeeklyView({ plan }: Props) {
         </div>
 
         <div className="flex items-center gap-2">
-          <button onClick={() => setWeekOffset(prev => prev - 1)} className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50"><ChevronLeft className="w-5 h-5 text-gray-600" /></button>
-          <button onClick={() => setWeekOffset(0)} className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-blue-600 hover:bg-blue-50 rounded-lg">Today</button>
-          <button onClick={() => setWeekOffset(prev => prev + 1)} className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50"><ChevronRight className="w-5 h-5 text-gray-600" /></button>
+          <button onClick={() => setWeekOffset(prev => prev - 1)} className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-all"><ChevronLeft className="w-5 h-5 text-gray-600" /></button>
+          <button onClick={() => setWeekOffset(0)} className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-blue-600 hover:bg-blue-50 rounded-lg transition-all">Current Week</button>
+          <button onClick={() => setWeekOffset(prev => prev + 1)} className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-all"><ChevronRight className="w-5 h-5 text-gray-600" /></button>
         </div>
       </div>
 
+      {/* 📅 Grid */}
       <div className="w-full overflow-x-auto pb-4 custom-scrollbar">
         <div className="grid grid-cols-7 gap-4 min-w-[1000px]">
           {visibleDays.map((day) => (
-            <DayColumn key={day.date} day={day} isPast={day.date < todayStr} isToday={day.date === todayStr} />
+            <DayColumn 
+              key={day.date} 
+              day={day} 
+              isPast={day.date < todayStr} 
+              isToday={day.date === todayStr}
+              exams={exams}
+              projects={projects}
+            />
           ))}
         </div>
       </div>
@@ -89,76 +100,68 @@ export function WeeklyView({ plan }: Props) {
   );
 }
 
-function DayColumn({ day, isPast, isToday }: { day: DayPlan; isPast: boolean; isToday: boolean }) {
+function DayColumn({ day, isPast, isToday, exams, projects }: { 
+  day: DayPlan; 
+  isPast: boolean; 
+  isToday: boolean;
+  exams: any[];
+  projects: any[];
+}) {
   const dateObj = new Date(day.date + "T00:00:00");
   const dayName = dateObj.toLocaleDateString("en-GB", { weekday: "short" });
   const dayNum = dateObj.getDate();
-  const loadRatio = day.totalUsed / day.baseCapacity;
   const isOverloaded = day.totalUsed > day.baseCapacity;
 
-  // 📈 Workload Score Logic: Subtlety for sanity
-  const score = useMemo(() => {
-    if (day.totalUsed === 0) return { dot: "bg-gray-200", text: null };
-    if (isOverloaded) return { dot: "bg-red-500", text: "Overload" };
-    if (loadRatio > 0.7) return { dot: "bg-orange-400", text: null };
-    return { dot: "bg-emerald-500", text: null };
-  }, [day.totalUsed, loadRatio, isOverloaded]);
+  // Milestone Filters (Normalization to match dates correctly)
+  const dayExams = (exams || []).filter(e => (e.date || e.due_date)?.slice(0, 10) === day.date);
+  const dayProjects = (projects || []).filter(p => (p.due_date || p.date)?.slice(0, 10) === day.date);
 
   return (
     <div className={`flex flex-col gap-4 p-2 rounded-2xl border transition-all 
       ${isPast ? "opacity-30 grayscale-[0.4]" : "opacity-100"}
       ${isToday ? "bg-blue-50/30 border-blue-200 shadow-sm ring-1 ring-blue-100" : "border-transparent"}
     `}>
-      {/* 📅 Date Header & Indicators */}
-      <div className="text-center py-2 relative">
+      <div className="text-center py-2">
         <div className={`text-[10px] font-black uppercase tracking-widest ${isToday ? "text-blue-600" : "text-gray-400"}`}>
           {dayName}
         </div>
-        
-        <div className="flex items-center justify-center gap-1.5 mt-1">
-          <div className={`text-2xl font-black ${isToday ? "text-blue-600" : isOverloaded ? "text-red-500" : "text-gray-900"}`}>
-            {dayNum}
-          </div>
-          {/* Status Dot: Subtle indicator for balanced/heavy days */}
-          {!isPast && (
-            <div className={`w-2 h-2 rounded-full ${score.dot} ${isOverloaded ? 'animate-pulse' : ''}`} />
-          )}
+        <div className={`text-2xl font-black ${isToday ? "text-blue-600" : isOverloaded ? "text-red-500" : "text-gray-900"}`}>
+          {dayNum}
         </div>
-
-        {/* Capacity Progress Bar */}
         <div className="mt-2 h-1.5 w-full rounded-full bg-gray-200/50 overflow-hidden">
           <div
             className={`h-full transition-all duration-700 ${isOverloaded ? "bg-red-500" : "bg-blue-500"}`}
             style={{ width: `${Math.min(100, (day.totalUsed / day.baseCapacity) * 100)}%` }}
           />
         </div>
-
-        {/* ⚠️ Crisis Text: Only shows when Overloaded */}
-        {score.text && (
-          <p className="text-[8px] font-black uppercase mt-1 tracking-tighter text-red-600 animate-bounce">
-            {score.text}
-          </p>
-        )}
       </div>
 
-      {/* 📝 Task List for the Day */}
+      {/* 🚀 Milestones (Amber for Exams, Blue for Projects) */}
+      {(dayExams.length > 0 || dayProjects.length > 0) && (
+        <div className="flex flex-col gap-1 px-1">
+          {dayExams.map((exam, i) => (
+            <div key={i} className="px-2 py-1 rounded bg-amber-500 text-white text-[8px] font-black uppercase shadow-sm flex items-center gap-1">
+              <span>🎓</span> <span className="truncate">{exam.subject} EXAM</span>
+            </div>
+          ))}
+          {dayProjects.map((proj, i) => (
+            <div key={i} className="px-2 py-1 rounded bg-blue-600 text-white text-[8px] font-black uppercase shadow-sm flex items-center gap-1">
+              <span>🏁</span> <span className="truncate">{proj.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Task List */}
       <div className="flex flex-col gap-2">
-        {day.weekly.items.map((item) => (
-          <TaskBlock key={`week-${item.id}`} label={item.name} minutes={item.minutes} type="Weekly" color="indigo" />
-        ))}
-        {day.homework.items.map((item) => (
-          <TaskBlock key={`hwk-${item.id}`} label={item.name} minutes={item.minutes} type="Hwk" subject={item.subject} color="emerald" />
-        ))}
-        {day.revision.slots.map((slot, i) => (
-          <TaskBlock key={`rev-${i}-${day.date}`} label={slot.label} minutes={slot.slotMinutes} type="Rev" subject={slot.subject} color="amber" />
-        ))}
-        {day.projects.items.map((p) => (
-          <TaskBlock key={`proj-${p.projectId}`} label={p.name} minutes={p.minutes} type="Proj" subject={p.subject} color="sky" />
-        ))}
+        {day.weekly.items.map((item) => <TaskBlock key={`w-${item.id}`} label={item.name} minutes={item.minutes} type="Weekly" color="indigo" />)}
+        {day.homework.items.map((item) => <TaskBlock key={`h-${item.id}`} label={item.name} minutes={item.minutes} type="Hwk" subject={item.subject} color="emerald" />)}
+        {day.revision.slots.map((slot, i) => <TaskBlock key={`r-${i}-${day.date}`} label={slot.label} minutes={slot.slotMinutes} type="Rev" subject={slot.subject} color="amber" />)}
+        {day.projects.items.map((p) => <TaskBlock key={`p-${p.projectId}`} label={p.name} minutes={p.minutes} type="Proj" subject={p.subject} color="sky" />)}
         
-        {day.totalUsed === 0 && (
+        {day.totalUsed === 0 && dayExams.length === 0 && dayProjects.length === 0 && (
           <div className="py-12 text-center text-[9px] font-black uppercase tracking-tighter text-gray-300 border-2 border-dashed border-gray-100 rounded-xl">
-            Rest Day
+            Rest
           </div>
         )}
       </div>
@@ -175,7 +178,7 @@ function TaskBlock({ label, minutes, type, color, subject }: any) {
   };
 
   return (
-    <div className={`group rounded-xl border p-2.5 shadow-sm bg-white ${colors[color] || colors.indigo}`}>
+    <div className={`group rounded-xl border p-2.5 shadow-sm bg-white transition-all hover:scale-[1.02] ${colors[color] || colors.indigo}`}>
       <div className="flex flex-wrap gap-1 mb-1">
         <span className="text-[7px] font-black uppercase px-1 rounded bg-white/80">{type}</span>
         {subject && <span className="text-[7px] font-black uppercase px-1 rounded bg-blue-600 text-white">{subject}</span>}
