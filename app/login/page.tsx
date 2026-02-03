@@ -35,13 +35,13 @@ export default function LoginPage() {
         {/* 👋 Brand Header */}
         <div className="text-center space-y-3">
           <div className="inline-flex p-4 bg-slate-900 rounded-[2rem] shadow-2xl shadow-slate-200 mb-4">
-             <Zap className="w-8 h-8 text-white fill-current" />
+            <Zap className="w-8 h-8 text-white fill-current" />
           </div>
           <h1 className="text-4xl font-black text-slate-900 tracking-tighter italic leading-none">
-            Study <span className="text-blue-600">OS</span>
+            Plan <span className="text-blue-600">Bee</span>
           </h1>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
-            Authorize to begin your session
+            Login to begin your session
           </p>
         </div>
 

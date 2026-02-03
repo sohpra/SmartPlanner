@@ -40,10 +40,10 @@ export default function LayoutReplit({ children }: { children: React.ReactNode }
         <div className="p-8">
           <div className="flex items-center gap-3">
             <div className="bg-blue-600 p-2 rounded-xl rotate-3 shadow-lg shadow-blue-100">
-              <Zap className="w-5 h-5 text-white fill-current" />
+              <Zap className="w-5 h-5 text-white fill-current" /> 
             </div>
             <span className="text-xl font-black italic tracking-tighter text-slate-900">
-              Study <span className="text-blue-600">OS</span>
+              Plan <span className="text-blue-600">Bee</span>
             </span>
           </div>
         </div>

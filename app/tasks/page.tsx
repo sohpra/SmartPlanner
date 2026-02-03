@@ -56,7 +56,7 @@ export default function TasksPage() {
           onClick={() => setOpenAddTask(true)}
           className="flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-8 py-4 text-[10px] font-black uppercase tracking-widest text-white hover:bg-blue-600 transition-all shadow-xl shadow-slate-200 active:scale-95"
         >
-          <Plus className="w-4 h-4" /> Initialize Task
+          <Plus className="w-4 h-4" /> Add Task
         </button>
       </div>
 
