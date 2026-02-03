@@ -57,37 +57,44 @@ export function buildWeekPlan({
   // 3. Homework (Strict No-Jump Logic)
   const orderedDeadlines = [...deadlines].sort((a, b) => daysBetween(today, a.due_date) - daysBetween(today, b.due_date));
   
-  for (const task of orderedDeadlines) {
-    const candidates = windowDates.filter(d => d < task.due_date);
-    if (candidates.length === 0) continue;
+ // Inside buildWeekPlan.ts
+for (const task of orderedDeadlines) {
+  const candidates = windowDates.filter(d => d < task.due_date);
+  if (candidates.length === 0) continue;
 
-    const isLarge = task.estimated_minutes >= 60;
-    if (isLarge) {
-      // Force into the latest possible day before due date (Sticky)
-      const target = candidates[candidates.length - 1];
-      homeworkItems[target].push({ 
+  const isLarge = task.estimated_minutes >= 60;
+  if (isLarge) {
+    const target = candidates[candidates.length - 1];
+    // CRITICAL: Only add if this is the SPECIFIC target day
+    homeworkItems[target].push({ 
+      id: task.id, 
+      name: task.name, 
+      subject: task.subject, 
+      dueDate: task.due_date, 
+      minutes: task.estimated_minutes 
+    });
+    remainingCap[target] -= task.estimated_minutes;
+  } else {
+    let rem = task.estimated_minutes;
+    for (const d of candidates) {
+      if (rem <= 0) break;
+      const isLast = d === candidates[candidates.length - 1];
+      // Only consume capacity on days that have it, or force on the last day
+      if (remainingCap[d] > 0 || isLast) {
+        const used = isLast ? rem : Math.min(remainingCap[d], rem);
+        homeworkItems[d].push({ 
           id: task.id, 
           name: task.name, 
-          subject: task.subject, // Make sure this is included!
+          subject: task.subject, 
           dueDate: task.due_date, 
-          minutes: task.estimated_minutes 
-        });      
-        remainingCap[target] -= task.estimated_minutes;
-    } else {
-      // Small tasks fill gaps
-      let rem = task.estimated_minutes;
-      for (const d of candidates) {
-        if (rem <= 0) break;
-        const isLast = d === candidates[candidates.length - 1];
-        if (remainingCap[d] > 0 || isLast) {
-          const used = isLast ? rem : Math.min(remainingCap[d], rem);
-          homeworkItems[d].push({ id: task.id, name: task.name, dueDate: task.due_date, minutes: used });
-          remainingCap[d] -= used;
-          rem -= used;
-        }
+          minutes: used 
+        });
+        remainingCap[d] -= used;
+        rem -= used;
       }
     }
   }
+}
 
   // 4. Revision (Uses leftover capacity)
   const revisionCap: Record<string, number> = {};

@@ -24,27 +24,26 @@ export default function PlannerPage() {
   
   // 1. LIVE DATA HOOKS
   const exams = useExams();
-  const { projects, isLoading: projectsLoading } = useProjects();
-  const { tasks: deadlines, isLoading: deadlinesLoading } = useDeadlineTasks();
-  const { tasks: weeklyTasks, isLoading: weeklyLoading } = useWeeklyTasks();
+  const { projects = [], isLoading: projectsLoading } = useProjects();
+  const { tasks: deadlines = [], isLoading: deadlinesLoading } = useDeadlineTasks();
+  const { tasks: weeklyTasks = [], isLoading: weeklyLoading } = useWeeklyTasks();
   const completions = useDailyCompletions(new Date());
 
   // 2. VIEW STATE
   const [view, setView] = useState<"daily" | "weekly" | "monthly">("daily");
 
-  // 3. THE DYNAMIC ENGINE (Reactive to every database change)
+  // 3. THE DYNAMIC ENGINE
   const activePlan = useMemo(() => {
     const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading;
     
     if (!isDataLoaded) return null;
 
-    // This now runs the new "Sticky Homework" and "Golden Slot" logic
     return buildWeekPlan({
       today,
       numDays: 30,
       weeklyTasks,
       deadlines,
-      exams: exams.upcoming,
+      exams: exams.upcoming || [],
       projects,
     });
   }, [today, exams.upcoming, projects, deadlines, weeklyTasks, exams.loading, projectsLoading, deadlinesLoading, weeklyLoading]);
@@ -105,44 +104,45 @@ export default function PlannerPage() {
           {view === "daily" && (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
               
-              {/* Simplified Top Metrics Row */}
+              {/* 1. TOP HEADER: Now has "Today" and Overload badge */}
+              <div className="flex items-center justify-between">
+                <h2 className="text-3xl font-black text-gray-900 tracking-tight">Today</h2>
+                {todayPlan.totalUsed > todayPlan.baseCapacity && (
+                  <div className="flex items-center gap-2 bg-red-50 border border-red-100 px-3 py-1.5 rounded-full">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                    </span>
+                    <span className="text-red-700 text-[10px] font-black uppercase tracking-wider">
+                      Overloaded (+{todayPlan.totalUsed - todayPlan.baseCapacity}m)
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. METRIC CARDS: Polished Titles & Sizes */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-6 bg-white rounded-2xl border border-gray-200 shadow-sm">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Tasks completed</p>
+                <div className="p-8 bg-white rounded-2xl border border-gray-200 shadow-sm">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Tasks completed</p>
                   <div className="flex items-baseline gap-2">
-                    <p className="text-4xl font-black text-gray-900">{completions.completed.size}</p>
-                    <p className="text-lg font-bold text-gray-400">/ {todayPlan.weekly.items.length + todayPlan.homework.items.length + todayPlan.revision.slots.length}</p>
+                    <p className="text-5xl font-black text-gray-900">{completions.completed.size}</p>
+                    <p className="text-xl font-bold text-gray-400">/ {todayPlan.weekly.items.length + todayPlan.homework.items.length + todayPlan.revision.slots.length}</p>
                   </div>
                 </div>
 
-                <div className="p-6 bg-white rounded-2xl border border-gray-200 shadow-sm">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Study time today</p>
+                <div className="p-8 bg-white rounded-2xl border border-gray-200 shadow-sm">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Planned Time</p>
                   <div className="flex items-baseline gap-2">
-                    <p className="text-4xl font-black text-gray-900">
+                    <p className="text-5xl font-black text-gray-900">
                       {Math.floor(todayPlan.totalUsed / 60)}h {todayPlan.totalUsed % 60}m
                     </p>
                   </div>
-                  <p className="text-[10px] text-gray-400 font-bold uppercase mt-1">Planned allocation</p>
                 </div>
               </div>
               
-              <section>
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl font-black text-gray-900 tracking-tight">Today's Focus</h2>
-                  {todayPlan.totalUsed > todayPlan.baseCapacity && (
-                    <div className="flex items-center gap-2 bg-red-50 border border-red-100 px-3 py-1.5 rounded-full">
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                      </span>
-                      <span className="text-red-700 text-[10px] font-black uppercase tracking-wider">
-                        Overloaded (+{todayPlan.totalUsed - todayPlan.baseCapacity}m)
-                      </span>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Unified Checklist Component */}
+              {/* 3. CHECKLIST SECTION */}
+              <section className="pt-2">
+                <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-6">Focus Areas</h3>
                 <DailyChecklist 
                   day={todayPlan} 
                   completions={checklistCompletions} 
@@ -164,11 +164,11 @@ export default function PlannerPage() {
           )}
         </div>
 
-        {/* 📋 Sidebar - Clean Props-based approach */}
+        {/* 📋 SIDEBAR */}
         {view === "daily" && (
           <aside className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
             <TomorrowChecklist day={tomorrowPlan} />
-            <ComingUp deadlines={deadlines} exams={exams.upcoming} />
+            <ComingUp projects={projects || []} exams={exams.upcoming || []} />
           </aside>
         )}
       </div>
