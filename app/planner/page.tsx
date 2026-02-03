@@ -21,6 +21,8 @@ import { useDailyCompletions } from "@/hooks/use-daily-completions";
 // Logic
 import { buildWeekPlan } from "@/lib/planner/buildWeekPlan";
 
+export const dynamic = 'force-dynamic';
+
 export default function PlannerPage() {
   const searchParams = useSearchParams();
   const urlView = searchParams.get("view");
