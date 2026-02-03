@@ -1,5 +1,6 @@
+// app/layout.tsx
 import "./globals.css";
-import { LayoutReplit } from "./components/Layout.replit";
+import LayoutReplit from "./components/Layout.replit"; // Removed the curly braces
 
 export default function RootLayout({
   children,
@@ -8,7 +9,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body suppressHydrationWarning>
+      <body suppressHydrationWarning className="bg-white">
         <LayoutReplit>{children}</LayoutReplit>
       </body>
     </html>

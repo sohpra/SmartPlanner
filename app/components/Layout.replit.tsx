@@ -1,95 +1,108 @@
 "use client";
 
-import { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
 import { 
   LayoutDashboard, 
-  Calendar, 
-  BookOpen, 
-  CheckSquare, 
-  Zap, 
-  User 
+  ClipboardList, 
+  GraduationCap, 
+  Settings, 
+  LogOut, 
+  Zap 
 } from "lucide-react";
 
-interface LayoutReplitProps {
-  children: ReactNode;
-}
-
-const navItems = [
-  { href: "/planner", label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
-  { href: "/planner?view=weekly", label: "Weekly View", icon: <Calendar className="w-4 h-4" /> },
-  { href: "/planner?view=monthly", label: "Strategic Month", icon: <Zap className="w-4 h-4" /> },
-  { href: "/exams", label: "My Exams", icon: <BookOpen className="w-4 h-4" /> },
-  { href: "/tasks", label: "Task List", icon: <CheckSquare className="w-4 h-4" /> },
-];
-
-export function LayoutReplit({ children }: LayoutReplitProps) {
+export default function LayoutReplit({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const currentView = searchParams.get("view");
+  const [user, setUser] = useState<any>(null);
 
-  // Don't show sidebar on login or home landing
-  const isAuthPage = pathname === "/login" || pathname === "/";
-  if (isAuthPage) return <>{children}</>;
+  // 1. Fetch user on mount
+  useEffect(() => {
+    const getUser = async () => {
+      const { data } = await supabase.auth.getUser();
+      setUser(data.user);
+    };
+    getUser();
+  }, []);
+
+  const navItems = [
+    { name: "Planner", href: "/planner", icon: LayoutDashboard },
+    { name: "Tasks", href: "/tasks", icon: ClipboardList },
+    { name: "Exams", href: "/exams", icon: GraduationCap },
+  ];
 
   return (
-    <div className="flex h-screen bg-[#FDFDFD] overflow-hidden">
-      {/* 🧭 Professional Sidebar */}
-      <aside className="w-64 bg-white border-r border-gray-100 flex flex-col hidden md:flex">
+    <div className="flex h-screen bg-white">
+      {/* 🛠️ SIDEBAR */}
+      <aside className="w-64 border-r border-slate-100 flex flex-col bg-[#FDFDFD]">
+        {/* Logo Section */}
         <div className="p-8">
-          {/* Brand Logo */}
-          <div className="flex items-center gap-3 mb-10 group cursor-pointer">
-            <div className="bg-blue-600 p-2.5 rounded-2xl shadow-lg shadow-blue-200 rotate-3 group-hover:rotate-0 transition-transform">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-600 p-2 rounded-xl rotate-3 shadow-lg shadow-blue-100">
               <Zap className="w-5 h-5 text-white fill-current" />
             </div>
-            <h1 className="text-xl font-black tracking-tighter italic text-slate-900">
-              STUDY<span className="text-blue-600">.OS</span>
-            </h1>
+            <span className="text-xl font-black italic tracking-tighter text-slate-900">
+              Study <span className="text-blue-600">OS</span>
+            </span>
           </div>
-
-          {/* Navigation */}
-          <nav className="space-y-1">
-            {navItems.map((item) => {
-              // Check if current URL matches the item's href exactly, 
-              // or matches the specific 'view' query param
-              const isActive = (pathname + (searchParams.toString() ? `?view=${currentView}` : "")) === item.href;
-
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all
-                    ${isActive
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-200" 
-                        : "text-slate-400 hover:bg-slate-50 hover:text-slate-900"
-                    }`}
-                >
-                  {item.icon}
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
         </div>
 
-        {/* User Badge */}
-        <div className="mt-auto p-6 border-t border-gray-50 flex items-center gap-3 bg-gray-50/50">
-          <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">
-            <User className="w-4 h-4 text-slate-500" />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-[10px] font-black text-slate-900 uppercase tracking-tighter">Demo User</span>
-            <span className="text-[9px] font-bold text-slate-400 uppercase">Pro Plan</span>
+        {/* Navigation */}
+        <nav className="flex-1 px-4 space-y-2">
+          {navItems.map((item) => {
+            const isActive = pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all ${
+                  isActive
+                    ? "bg-slate-900 text-white shadow-xl shadow-slate-200"
+                    : "text-slate-400 hover:text-slate-900 hover:bg-slate-50"
+                }`}
+              >
+                <item.icon className={`w-4 h-4 ${isActive ? "text-blue-400" : ""}`} />
+                {item.name}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* 👤 BOTTOM ACCOUNT SECTION */}
+        <div className="mt-auto p-4 border-t border-slate-50">
+          <div className="bg-slate-50/50 rounded-[2rem] p-4 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-2xl bg-white border border-slate-100 flex items-center justify-center text-blue-600 font-black text-xs shadow-sm">
+                {user?.email?.[0].toUpperCase() || "?"}
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] font-black text-slate-900 truncate uppercase tracking-tighter">
+                  {user?.email?.split('@')[0] || "Guest User"}
+                </span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">
+                  Session Active
+                </span>
+              </div>
+            </div>
+            
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut();
+                window.location.href = "/login";
+              }}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all border border-transparent hover:border-red-100"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Terminate
+            </button>
           </div>
         </div>
       </aside>
 
-      {/* 🖥️ Main Viewport */}
-      <main className="flex-1 overflow-y-auto h-screen custom-scrollbar">
-        <div className="max-w-7xl mx-auto p-6 md:p-10">
-          {children}
-        </div>
+      {/* 🚀 MAIN CONTENT */}
+      <main className="flex-1 overflow-y-auto bg-white">
+        {children}
       </main>
     </div>
   );

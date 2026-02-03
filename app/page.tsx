@@ -1,57 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
-export default function HomePage() {
+export default function RootPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
     const checkAuth = async () => {
       const { data } = await supabase.auth.getUser();
-
-      if (!data.user) {
-        router.replace("/login");
+      if (data.user) {
+        router.replace("/planner");
       } else {
-        setEmail(data.user.email ?? null);
-        setLoading(false);
+        router.replace("/login");
       }
     };
-
     checkAuth();
   }, [router]);
 
-  if (loading) {
-    return <div style={{ padding: 40 }}>Loading…</div>;
-  }
-
   return (
-    <div style={{ padding: 40 }}>
-      <h1>Smart Planner</h1>
-
-      <p>
-        Signed in as <strong>{email}</strong>
-      </p>
-
-      <div style={{ marginTop: 16 }}>
-        <button
-          onClick={() => router.push("/planner")}
-          style={{ marginRight: 12 }}
-        >
-          Go to Planner
-        </button>
-
-        <button
-          onClick={async () => {
-            await supabase.auth.signOut();
-            router.replace("/login");
-          }}
-        >
-          Sign out
-        </button>
+    <div className="h-screen flex items-center justify-center bg-white">
+      <div className="animate-pulse flex flex-col items-center gap-4">
+        <div className="h-10 w-10 bg-blue-600 rounded-2xl rotate-12 shadow-xl shadow-blue-50" />
       </div>
     </div>
   );
