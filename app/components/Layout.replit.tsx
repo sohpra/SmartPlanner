@@ -17,7 +17,6 @@ export default function LayoutReplit({ children }: { children: React.ReactNode }
   const pathname = usePathname();
   const [user, setUser] = useState<any>(null);
 
-  // 1. Fetch user on mount
   useEffect(() => {
     const getUser = async () => {
       const { data } = await supabase.auth.getUser();
@@ -33,9 +32,9 @@ export default function LayoutReplit({ children }: { children: React.ReactNode }
   ];
 
   return (
-    <div className="flex h-screen bg-white">
-      {/* 🛠️ SIDEBAR */}
-      <aside className="w-64 border-r border-slate-100 flex flex-col bg-[#FDFDFD]">
+    <div className="flex h-screen bg-white overflow-hidden">
+      {/* 🛠️ SIDEBAR - Hidden on mobile, flex on desktop (md:) */}
+      <aside className="hidden md:flex w-64 border-r border-slate-100 flex-col bg-[#FDFDFD] shrink-0">
         {/* Logo Section */}
         <div className="p-8">
           <div className="flex items-center gap-3">
@@ -101,7 +100,7 @@ export default function LayoutReplit({ children }: { children: React.ReactNode }
       </aside>
 
       {/* 🚀 MAIN CONTENT */}
-      <main className="flex-1 overflow-y-auto bg-white">
+      <main className="flex-1 overflow-y-auto bg-white relative">
         {children}
       </main>
     </div>
