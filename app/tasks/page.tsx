@@ -27,8 +27,21 @@ export default function TasksPage() {
   const [projects, setProjects] = useState(projectsFromHook);
 
   useEffect(() => { setWeeklyTasks(weeklyFromHook); }, [weeklyFromHook]);
-  useEffect(() => { setDeadlineTasks(deadlineFromHook); }, [deadlineFromHook]);
-  useEffect(() => { setProjects(projectsFromHook); }, [projectsFromHook]);
+  
+  //useEffect(() => { setDeadlineTasks(deadlineFromHook); }, [deadlineFromHook]);
+  // Filter strictly for active tasks
+  useEffect(() => { 
+    // Only show tasks that are NOT completed in the Register
+    const activeOnly = (deadlineFromHook || []).filter(t => t.status === 'active');
+    setDeadlineTasks(activeOnly); 
+  }, [deadlineFromHook]);
+
+  //useEffect(() => { setProjects(projectsFromHook); }, [projectsFromHook]);
+  // Filter for active projects
+  useEffect(() => { 
+    const activeProjects = (projectsFromHook || []).filter(p => p.status === 'active' || !p.status);
+    setProjects(activeProjects); 
+  }, [projectsFromHook]);
 
   // Grouping Weekly Tasks by Day
   const groupedWeekly = weeklyTasks.reduce((acc, task: any) => {

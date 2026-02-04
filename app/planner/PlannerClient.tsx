@@ -15,7 +15,7 @@ import { ComingUp } from "../components/dashboard/ComingUp";
 // Hooks
 import { useExams } from "@/hooks/use-exams";
 import { useProjects } from "@/hooks/use-projects";
-import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
+import { usePlannerDeadlineTasks } from "@/hooks/use-planner-tasks";
 import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
 import { useDailyCompletions } from "@/hooks/use-daily-completions";
 
@@ -39,9 +39,17 @@ export default function PlannerPage() {
 
   const exams = useExams();
   const { projects = [], isLoading: projectsLoading } = useProjects();
-  const { tasks: deadlines = [], isLoading: deadlinesLoading } = useDeadlineTasks();
+  // 1. Add 'updateTaskStatusLocally' to the destructuring here
+  const { 
+    tasks: deadlines = [], 
+    isLoading: deadlinesLoading, 
+    updateTaskStatusLocally 
+  } = usePlannerDeadlineTasks();
+
   const { tasks: weeklyTasks = [], isLoading: weeklyLoading } = useWeeklyTasks();
-  const completions = useDailyCompletions(new Date());
+
+  // 2. Pass 'updateTaskStatusLocally' as the second argument here
+  const completions = useDailyCompletions(new Date(), updateTaskStatusLocally);
 
   const activePlan = useMemo(() => {
     const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading;

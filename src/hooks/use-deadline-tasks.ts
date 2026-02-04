@@ -18,7 +18,10 @@ export function useDeadlineTasks() {
 
   async function fetchTasks() {
     setIsLoading(true);
-    // Notice the syntax: subjects(name). This joins the tables.
+    
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date().toISOString().split('T')[0];
+
     const { data, error } = await supabase
       .from("deadline_tasks")
       .select(`
@@ -28,7 +31,7 @@ export function useDeadlineTasks() {
         estimated_minutes, 
         status, 
         subject_id,
-        subjects (
+        subjects!left (
           name
         )
       `)
@@ -41,20 +44,20 @@ export function useDeadlineTasks() {
       return;
     }
 
-    // Inside fetchTasks()
     if (data) {
-      const flattenedTasks = data.map(task => ({
-        ...task,
-        // subjects is returned as an array: [{ name: "Maths" }]
-        // We grab the first item [0] or default to null
-        subject: Array.isArray(task.subjects) 
-          ? task.subjects[0]?.name 
-          : (task.subjects as any)?.name || null
+      const formattedTasks = data.map((t: any) => ({
+        ...t,
+        // Handle the array-vs-object mismatch for TypeScript
+        subject: Array.isArray(t.subjects) 
+          ? t.subjects[0]?.name 
+          : t.subjects?.name || "General"
       }));
-      setTasks(flattenedTasks as DeadlineTask[]);
+      setTasks(formattedTasks);
     }
     setIsLoading(false);
+
   }
+
 
   useEffect(() => {
     fetchTasks();
