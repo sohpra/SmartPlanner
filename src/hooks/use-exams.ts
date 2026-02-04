@@ -3,12 +3,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
+// 🎯 1. Updated Type: Added the new DB columns as optional fields
 export type Exam = {
   id: string;
   subject: string | null;
   exam_type: "Internal" | "Board" | "Competitive";
-  date: string; // YYYY-MM-DD
+  date: string; 
   preparedness: number | null;
+  // New Fields
+  topics: string | null;
+  exam_board?: string | null;
+  competitive_exam_name?: string | null;
 };
 
 export function useExams() {
@@ -18,13 +23,13 @@ export function useExams() {
   const fetchExams = useCallback(async () => {
     setLoading(true);
 
-    // 🚀 FILTER: Get today's date in YYYY-MM-DD to filter out past exams
     const today = new Date().toISOString().slice(0, 10);
 
+    // 🎯 2. Updated Select: Pulling the new columns from Supabase
     const { data, error } = await supabase
       .from("exams")
-      .select("id, subject, exam_type, date, preparedness")
-      .gte("date", today) // Only fetch exams scheduled for today or later
+      .select("id, subject, exam_type, date, preparedness, topics, exam_board, competitive_exam_name") 
+      .gte("date", today) 
       .order("date", { ascending: true });
 
     if (error) {
@@ -41,13 +46,12 @@ export function useExams() {
     fetchExams();
   }, [fetchExams]);
 
-  // Derived state remains the same to avoid regressing your metrics
   const subjectCount = Array.from(
     new Set((upcoming ?? []).map((e) => e.subject).filter(Boolean))
   ).length;
 
   return {
-    upcoming, // This is now filtered to only include future exams
+    upcoming,
     subjectCount,
     loading,
     refresh: fetchExams,
