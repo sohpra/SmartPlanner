@@ -28,22 +28,16 @@ export default function TasksPage() {
 
   useEffect(() => { setWeeklyTasks(weeklyFromHook); }, [weeklyFromHook]);
   
-  //useEffect(() => { setDeadlineTasks(deadlineFromHook); }, [deadlineFromHook]);
-  // Filter strictly for active tasks
   useEffect(() => { 
-    // Only show tasks that are NOT completed in the Register
     const activeOnly = (deadlineFromHook || []).filter(t => t.status === 'active');
     setDeadlineTasks(activeOnly); 
   }, [deadlineFromHook]);
 
-  //useEffect(() => { setProjects(projectsFromHook); }, [projectsFromHook]);
-  // Filter for active projects
   useEffect(() => { 
     const activeProjects = (projectsFromHook || []).filter(p => p.status === 'active' || !p.status);
     setProjects(activeProjects); 
   }, [projectsFromHook]);
 
-  // Grouping Weekly Tasks by Day
   const groupedWeekly = weeklyTasks.reduce((acc, task: any) => {
     const dayName = DAYS[task.day_of_week];
     if (!acc[dayName]) acc[dayName] = [];
@@ -62,51 +56,50 @@ export default function TasksPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-4 md:p-10 space-y-12 pb-20 animate-in fade-in duration-500">
+    <div className="max-w-6xl mx-auto p-4 md:p-10 space-y-8 md:space-y-12 pb-24 animate-in fade-in duration-500">
       
-      {/* 📋 Header: The Masterplan Style */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-gray-100 pb-10">
+      {/* 📋 Header */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 md:gap-6 border-b border-gray-100 pb-6 md:pb-10">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-1">
+          <p className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-1">
             Inventory 
           </p>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tighter italic text-balance">Task Register</h1>
-
+          <h1 className="text-2xl md:text-4xl font-black text-slate-900 tracking-tighter italic">Task Register</h1>
         </div>
         <button
           onClick={() => setOpenAddTask(true)}
-          className="flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-8 py-4 text-[10px] font-black uppercase tracking-widest text-white hover:bg-blue-600 transition-all shadow-xl active:scale-95"
+          className="flex items-center justify-center gap-2 rounded-xl md:rounded-2xl bg-slate-900 px-6 py-3 md:px-8 md:py-4 text-[9px] md:text-[10px] font-black uppercase tracking-widest text-white hover:bg-blue-600 transition-all shadow-xl active:scale-95 w-full md:w-auto"
         >
           <Plus className="w-4 h-4" /> Add Task
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 md:gap-10">
         
         {/* ⬅️ LEFT COLUMN: Homework & Projects */}
-        <div className="lg:col-span-7 space-y-12">
+        <div className="lg:col-span-7 space-y-8 md:space-y-12">
           
-          {/* 1. Homework and Assignments */}
-          <section className="space-y-6">
+          {/* 1. Homework */}
+          <section className="space-y-4 md:space-y-6">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-50 rounded-xl"><Calendar className="w-4 h-4 text-blue-600" /></div>
-              <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Homework</h2>
+              <div className="p-1.5 bg-blue-50 rounded-lg"><Calendar className="w-3.5 h-3.5 text-blue-600" /></div>
+              <h2 className="text-[9px] md:text-[11px] font-black uppercase tracking-widest text-slate-400">Homework</h2>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-3 md:space-y-4">
               {deadlineTasks.map((task) => (
-                <div key={task.id} className="group flex items-center justify-between p-6 bg-white border-2 border-slate-100 rounded-[2rem] hover:border-blue-500/20 transition-all">
+                <div key={task.id} className="group flex items-center justify-between p-4 md:p-6 bg-white border-2 border-slate-100 rounded-[1.5rem] md:rounded-[2rem] hover:border-blue-500/20 transition-all">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <div className="text-xl font-black italic tracking-tight text-slate-800">{task.name}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-lg md:text-xl font-black italic tracking-tight text-slate-800">{task.name}</div>
                       {task.subject && (
-                        <span className="text-[9px] font-black uppercase tracking-widest bg-blue-100 text-blue-600 px-2 py-0.5 rounded-lg">
+                        <span className="text-[7px] md:text-[9px] font-black uppercase tracking-widest bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-md md:rounded-lg">
                           {task.subject}
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 text-slate-400 pt-1 text-[9px] font-black uppercase tracking-widest">
+                    <div className="flex items-center gap-2 md:gap-3 text-slate-400 text-[8px] md:text-[9px] font-black uppercase tracking-widest">
                       <div className="flex items-center gap-1"><Clock className="w-3 h-3" /> {task.estimated_minutes}m</div>
-                      <div className="bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
+                      <div className="bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100">
                         Due {new Date(task.due_date).toLocaleDateString("en-GB", { day: 'numeric', month: 'short' })}
                       </div>
                     </div>
@@ -119,24 +112,19 @@ export default function TasksPage() {
             </div>
           </section>
 
-          {/* 2. Strategic Projects (THE MISSING PIECE) */}
-          <section className="space-y-6">
+          {/* 2. Projects */}
+          <section className="space-y-4 md:space-y-6">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-sky-50 rounded-xl"><Rocket className="w-4 h-4 text-sky-600" /></div>
-              <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Projects</h2>
+              <div className="p-1.5 bg-sky-50 rounded-lg"><Rocket className="w-3.5 h-3.5 text-sky-600" /></div>
+              <h2 className="text-[9px] md:text-[11px] font-black uppercase tracking-widest text-slate-400">Projects</h2>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-3 md:space-y-4">
               {projects.map((project) => (
-                <div key={project.id} className="group flex items-center justify-between p-6 bg-white border-2 border-slate-100 rounded-[2rem] hover:border-sky-500/20 transition-all">
+                <div key={project.id} className="group flex items-center justify-between p-4 md:p-6 bg-white border-2 border-slate-100 rounded-[1.5rem] md:rounded-[2rem] hover:border-sky-500/20 transition-all">
                   <div className="space-y-1">
-                    <div className="text-xl font-black italic tracking-tight text-slate-800">
-                      {project.name}
-                    </div>
-                    <div className="flex items-center gap-3 text-slate-400 pt-1 text-[9px] font-black uppercase tracking-widest">
-                      <div className="flex items-center gap-1"><Clock className="w-3 h-3" /> {project.estimated_minutes}m</div>
-                      <div className="text-sky-600 font-bold italic lowercase opacity-80">
-                        // active_initiative
-                      </div>
+                    <div className="text-lg md:text-xl font-black italic tracking-tight text-slate-800">{project.name}</div>
+                    <div className="flex items-center gap-2 text-slate-400 text-[8px] md:text-[9px] font-black uppercase tracking-widest italic lowercase opacity-80">
+                      // active_initiative • {project.estimated_minutes}m
                     </div>
                   </div>
                   <button onClick={() => deleteRow("projects", project.id)} className="p-2 text-slate-200 hover:text-red-500 transition-all">
@@ -144,54 +132,41 @@ export default function TasksPage() {
                   </button>
                 </div>
               ))}
-              {projects.length === 0 && (
-                <div className="p-8 border-2 border-dashed border-slate-100 rounded-[2rem] text-center">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">No active strategic projects</p>
-                </div>
-              )}
             </div>
           </section>
         </div>
 
-        {/* ➡️ RIGHT COLUMN: Weekly Routine (Collapsible & Monday Start) */}
+        {/* ➡️ RIGHT COLUMN: Weekly Routine */}
         <aside className="lg:col-span-5">
-          <div className="bg-gray-50/50 rounded-[2.5rem] p-8 border border-gray-100 sticky top-8">
-            <div className="flex items-center gap-3 mb-8">
-              <div className="p-2 bg-indigo-50 rounded-xl"><Repeat className="w-4 h-4 text-indigo-600" /></div>
-              <h2 className="text-[11px] font-black uppercase tracking-widest text-slate-400">Weekly Routine</h2>
+          <div className="bg-gray-50/50 rounded-[2rem] md:rounded-[2.5rem] p-5 md:p-8 border border-gray-100 md:sticky md:top-8">
+            <div className="flex items-center gap-3 mb-6 md:mb-8">
+              <div className="p-1.5 bg-indigo-50 rounded-lg"><Repeat className="w-3.5 h-3.5 text-indigo-600" /></div>
+              <h2 className="text-[9px] md:text-[11px] font-black uppercase tracking-widest text-slate-400">Weekly Routine</h2>
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-4 md:space-y-6">
               {SORTED_DAYS.map((day) => {
                 const dayTasks = groupedWeekly[day] || [];
                 if (dayTasks.length === 0) return null;
                 const isCollapsed = collapsedDays[day];
 
                 return (
-                  <div key={day} className="space-y-3">
-                    <button 
-                      onClick={() => toggleDay(day)}
-                      className="flex items-center justify-between w-full group"
-                    >
-                      <h3 className="text-[10px] font-black uppercase tracking-widest text-indigo-500 italic">{day}</h3>
-                      <div className="h-[1px] flex-grow mx-4 bg-indigo-100" />
-                      {isCollapsed ? <ChevronRight className="w-3 h-3 text-indigo-300" /> : <ChevronDown className="w-3 h-3 text-indigo-300" />}
+                  <div key={day} className="space-y-2 md:space-y-3">
+                    <button onClick={() => toggleDay(day)} className="flex items-center justify-between w-full">
+                      <h3 className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-indigo-500 italic">{day}</h3>
+                      <div className="h-[1px] flex-grow mx-3 bg-indigo-100" />
+                      {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                     </button>
 
                     {!isCollapsed && (
-                      <div className="space-y-2 animate-in slide-in-from-top-2 duration-200">
+                      <div className="space-y-2">
                         {dayTasks.map((task) => (
-                          <div key={task.id} className="group flex items-center justify-between p-4 bg-white border border-gray-100 rounded-2xl hover:shadow-lg transition-all">
+                          <div key={task.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl">
                             <div>
-                              <div className="flex items-center gap-2">
-                                <div className="text-sm font-bold text-slate-900">{task.name}</div>
-                                {task.task_type && task.task_type !== "Regular Study Slot" && (
-                                  <span className="text-[8px] font-black uppercase text-indigo-400 border border-indigo-100 px-1.5 rounded">{task.task_type}</span>
-                                )}
-                              </div>
-                              <div className="text-[9px] font-black text-slate-400 uppercase mt-0.5 tracking-widest">{task.duration_minutes}M</div>
+                              <div className="text-xs md:text-sm font-bold text-slate-900">{task.name}</div>
+                              <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{task.duration_minutes}M</div>
                             </div>
-                            <button onClick={() => deleteRow("recurring_tasks", task.id)} className="opacity-0 group-hover:opacity-100 p-2 text-gray-200 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                            <button onClick={() => deleteRow("recurring_tasks", task.id)} className="p-2 text-gray-200 hover:text-red-500"><Trash2 size={14} /></button>
                           </div>
                         ))}
                       </div>
