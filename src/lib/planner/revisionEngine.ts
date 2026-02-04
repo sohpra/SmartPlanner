@@ -6,6 +6,8 @@ export type ExamInput = {
   exam_type: ExamType;
   date: string;
   preparedness: number | null;
+  competitive_exam_name?: string | null;
+  exam_board?: string | null;
 };
 
 export type RevisionProfile = {
@@ -23,6 +25,8 @@ export type RevisionDemand = {
   totalMinutes: number;
   slotMinutes: number;
   remainingSlots: number;
+  competitive_exam_name?: string | null;
+  exam_board?: string | null;
 };
 
 export type PlannedRevisionSlot = {
@@ -85,6 +89,13 @@ function typePriority(t: ExamType): number {
   return 1;
 }
 
+const getDynamicLabel = (d: RevisionDemand, suffix: string) => {
+  if (d.examType === "Competitive" && d.competitive_exam_name) return d.competitive_exam_name;
+  if (d.examType === "Board" && d.exam_board) return `${d.subject} (${d.exam_board})`;
+  return `${d.subject} ${suffix}`;
+};
+
+
 export function buildRevisionDemand(exam: ExamInput): RevisionDemand | null {
   const examDate = toDateOnly(exam.date);
   const subject = (exam.subject ?? "Unknown").trim();
@@ -105,6 +116,8 @@ export function buildRevisionDemand(exam: ExamInput): RevisionDemand | null {
     totalMinutes,
     slotMinutes: profile.slotMinutes,
     remainingSlots: Math.ceil(totalMinutes / profile.slotMinutes),
+    competitive_exam_name: exam.competitive_exam_name,
+    exam_board: exam.exam_board
   };
 }
 
@@ -140,7 +153,7 @@ export function planRevisionSlots(
         subject: d.subject,
         examType: d.examType,
         slotMinutes: lockMinutes,
-        label: `FINAL PREP: ${d.subject}`,
+        label: `FINAL: ${getDynamicLabel(d, "")}`,
       });
       targetDay.usedMinutes += lockMinutes;
       targetDay.remainingMinutes -= lockMinutes;
@@ -171,7 +184,7 @@ export function planRevisionSlots(
           subject: d.subject,
           examType: d.examType,
           slotMinutes: d.slotMinutes,
-          label: `${d.subject} - Revision`,
+          label: getDynamicLabel(d, "Revision"),
         });
         d.remainingSlots--;
         day.usedMinutes += d.slotMinutes;
@@ -194,7 +207,7 @@ export function planRevisionSlots(
         subject: d.subject,
         examType: d.examType,
         slotMinutes: d.slotMinutes,
-        label: `${d.subject} - Extra Prep`,
+        label: getDynamicLabel(d, "Extra Prep"),
       });
       d.remainingSlots--;
       targetDay.usedMinutes += d.slotMinutes;
