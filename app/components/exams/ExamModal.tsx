@@ -40,7 +40,7 @@ async function handleSubmit() {
     exam_type: string;
     date: string;
     preparedness: number;
-    topics?: string[];
+    topics?: string;
     exam_board?: string;
     competitive_exam_name?: string;
   };
@@ -57,7 +57,7 @@ async function handleSubmit() {
   let payload: ExamPayload = { ...base };
 
   if (examType === "internal") {
-    payload.topics = topicInput ? [topicInput] : [];
+    payload.topics = topicInput ;
   } else if (examType === "board") {
     payload.exam_board = examBoard;
   } else if (examType === "competitive") {
