@@ -3,12 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
-/**
- * @param date - The current date being viewed
- * @param onStatusChange - Optional callback to update local task state in the planner
- */
 export function useDailyCompletions(date: Date, onStatusChange?: (id: string, status: string) => void) {
   const [completed, setCompleted] = useState<Set<string>>(new Set());
+  // 🎯 Added specific type to avoid 'any' errors
+  const [allCompletions, setAllCompletions] = useState<{source_type: string, source_id: string, date: string}[]>([]); 
   const [isLoading, setIsLoading] = useState(true);
   
   const dateKey = date.toISOString().slice(0, 10);
@@ -21,14 +19,19 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
       return;
     }
 
+    // Fetch all history so we can filter out past completed tasks
     const { data, error } = await supabase
       .from("daily_completions")
-      .select("source_type, source_id")
-      .eq("user_id", session.user.id)
-      .eq("date", dateKey);
+      .select("source_type, source_id, date")
+      .eq("user_id", session.user.id);
 
     if (!error && data) {
-      const keys = data.map((item) => `${item.source_type}:${item.source_id}`);
+      setAllCompletions(data);
+      
+      // Map only today's keys for the UI checkboxes
+      const keys = data
+        .filter((item: any) => item.date === dateKey)
+        .map((item: any) => `${item.source_type}:${item.source_id}`);
       setCompleted(new Set(keys));
     }
     setIsLoading(false);
@@ -43,11 +46,8 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
 
     const key = `${source_type}:${source_id}`;
     const isCurrentlyDone = completed.has(key);
-    
-    // Determine the new database status
     const newStatus = isCurrentlyDone ? 'active' : 'completed';
 
-    // 1. Optimistic UI: Update the 'check' mark immediately
     setCompleted((prev) => {
       const next = new Set(prev);
       if (isCurrentlyDone) next.delete(key);
@@ -55,8 +55,6 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
       return next;
     });
 
-    // 2. THE SYNC FIX: Update the Planner's task list status immediately
-    // This moves the task between 'Active' and 'Finalized Today' buckets instantly
     if (source_type === "deadline_task" && onStatusChange) {
       onStatusChange(source_id, newStatus);
     }
@@ -66,7 +64,6 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
 
     try {
       if (isCurrentlyDone) {
-        // --- UNCHECKING ---
         await supabase.from("daily_completions")
           .delete()
           .eq("user_id", session.user.id)
@@ -78,7 +75,6 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
           await supabase.from("deadline_tasks").update({ status: 'active' }).eq("id", source_id);
         }
       } else {
-        // --- CHECKING ---
         await supabase.from("daily_completions").insert({
           user_id: session.user.id,
           source_type,
@@ -90,16 +86,18 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
           await supabase.from("deadline_tasks").update({ status: 'completed' }).eq("id", source_id);
         }
       }
+      // Refresh allCompletions after toggle to keep buildWeekPlan in sync
+      fetchCompletions(); 
     } catch (err) {
       console.error("Masterplan Sync Error:", err);
-      // Re-fetch to recover from errors
       fetchCompletions();
     }
   }, [completed, dateKey, fetchCompletions, onStatusChange]);
 
   return { 
     completed, 
-    toggleDeadlineTask, 
+    allCompletions, // 🎯 Included in return
+    toggleDeadlineTask, // 🎯 Shorthand property fixed
     dateKey, 
     isLoading, 
     refresh: fetchCompletions 

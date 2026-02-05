@@ -20,6 +20,7 @@ export function buildWeekPlan({
   deadlines,
   exams,
   projects,
+  completions = [], // 🎯 Make sure this is received
 }: any): WeekPlan {
   const windowDates = Array.from({ length: numDays }, (_, i) => addDays(today, i));
   
@@ -55,64 +56,68 @@ export function buildWeekPlan({
   });
 
   // 3. Homework (Status-Aware & Overdue-Safe)
+  /// 3. Homework (Status-Aware & Overdue-Safe)
   const orderedDeadlines = [...deadlines].sort((a, b) => daysBetween(today, a.due_date) - daysBetween(today, b.due_date));
   
-  // --- INSIDE Step 3: Homework (Status-Aware & Overdue-Safe) ---
-
-  // --- INSIDE Step 3: Homework (Status-Aware & Overdue-Safe) ---
+  // 🎯 THE GHOST HUNTER: Identify anything completed PRIOR to today
+  const completedBeforeToday = new Set(
+    completions
+      .filter((c: any) => c.date < today)
+      .map((c: any) => c.source_id)
+  );
 
   for (const task of orderedDeadlines) {
-    const mappedTask = { 
-      id: task.id, 
-      name: task.name, 
-      subject: task.subjects?.name || task.subject, 
-      dueDate: task.due_date, 
-      minutes: task.estimated_minutes,
-      status: task.status,
-      isOverdue: task.due_date < today
-    };
+    // 🎯 If this was finished  yesterday, skip it entirely.
+    if (completedBeforeToday.has(task.id)) continue;
 
-    // 1. Handle Overdue
-    if (task.due_date < today) {
-      homeworkItems[today].push(mappedTask);
-      // 🎯 FIX: Always subtract minutes for Today's view so new tasks don't rush in
-      remainingCap[today] -= task.estimated_minutes;
-      continue;
-    }
+  const mappedTask = { 
+    id: task.id, 
+    name: task.name, 
+    subject: task.subjects?.name || task.subject, 
+    dueDate: task.due_date, 
+    minutes: task.estimated_minutes,
+    status: task.status,
+    isOverdue: task.due_date < today
+  };
 
-    const candidates = windowDates.filter(d => d <= task.due_date);
-    if (candidates.length === 0) continue;
+  // 1. Handle Overdue (Only Active Overdue Tasks reach here now)
+  if (task.due_date < today) {
+    homeworkItems[today].push(mappedTask);
+    remainingCap[today] -= task.estimated_minutes;
+    continue;
+  }
 
-    let assigned = false;
-    for (const date of candidates) {
-      // 2. Handle Completed Tasks
-      if (task.status === 'completed') {
-        homeworkItems[date].push(mappedTask);
-        // 🎯 FIX: If it was completed TODAY, it still consumes today's capacity
-        // This prevents the "Moving Target" effect.
-        if (date === today) {
-          remainingCap[date] -= task.estimated_minutes;
-        }
-        assigned = true;
-        break;
-      }
+  const candidates = windowDates.filter(d => d <= task.due_date);
+  if (candidates.length === 0) continue;
 
-      // 3. Handle Active Tasks
-      if (remainingCap[date] >= task.estimated_minutes) {
-        homeworkItems[date].push(mappedTask);
+  let assigned = false;
+  for (const date of candidates) {
+    // 2. Handle Completed Tasks (Tasks completed on their actual due date or today)
+    if (task.status === 'completed') {
+      homeworkItems[date].push(mappedTask);
+      if (date === today) {
         remainingCap[date] -= task.estimated_minutes;
-        assigned = true;
-        break; 
       }
+      assigned = true;
+      break;
     }
 
-    // 4. Fallback for overflow
-    if (!assigned) {
-      const latestDate = candidates[candidates.length - 1];
-      homeworkItems[latestDate].push(mappedTask);
-      remainingCap[latestDate] -= task.estimated_minutes;
+    // 3. Handle Active Tasks
+    if (remainingCap[date] >= task.estimated_minutes) {
+      homeworkItems[date].push(mappedTask);
+      remainingCap[date] -= task.estimated_minutes;
+      assigned = true;
+      break; 
     }
   }
+
+  // 4. Fallback for overflow
+  if (!assigned) {
+    const latestDate = candidates[candidates.length - 1];
+    homeworkItems[latestDate].push(mappedTask);
+    remainingCap[latestDate] -= task.estimated_minutes;
+  }
+}
 
   // 4. Revision (Uses leftover capacity)
   const revisionCap: Record<string, number> = {};

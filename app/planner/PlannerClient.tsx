@@ -62,6 +62,7 @@ export default function PlannerPage() {
       deadlines,
       exams: exams.upcoming || [],
       projects,
+      completions: completions.allCompletions, // 🎯 Pass the new data here
     });
   }, [today, exams.upcoming, projects, deadlines, weeklyTasks, exams.loading, projectsLoading, deadlinesLoading, weeklyLoading]);
 
