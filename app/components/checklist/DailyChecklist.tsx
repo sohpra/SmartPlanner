@@ -30,24 +30,26 @@ export default function DailyChecklist({ day, completions }: Props) {
   // 2. Filter Logic: 
   // - Deadline Tasks move based on their 'status' property from the DB
   // - Others move based on the local 'completions' Set
+  // 2. Filter Logic: 
+  // 🎯 THE FIX: Use the SAME logic for both to ensure items don't vanish
+  // 2. Filter Logic: 
+  // 2. Filter Logic: 
   const activeItems = allPossibleItems.filter(item => {
+    // 🎯 If the DB says it's active, it's active.
     if (item.type === "deadline_task") {
-      // Show in Active only if not completed
-      return item.status !== 'completed';
+      return item.status === 'active';
     }
+    // For other types, check the local completion set
     return !completions.completed.has(`${item.type}:${item.id}`);
   });
 
   const finishedItems = allPossibleItems.filter(item => {
-  const isDoneToday = completions.completed.has(`${item.type}:${item.id}`);
-
-  if (item.type === "deadline_task") {
-    // 🎯 If it's a deadline task (like French Grammar), it must be both 
-    // marked 'completed' in DB AND have a log entry for today.
-    return item.status === 'completed' && isDoneToday;
-  }
-  return isDoneToday;
-});
+    // 🎯 If the DB says it's completed, it's finished.
+    if (item.type === "deadline_task") {
+      return item.status === 'completed';
+    }
+    return completions.completed.has(`${item.type}:${item.id}`);
+  });
 
   // Helper to render a task row
   const TaskRow = ({ item, isDone }: { item: any, isDone: boolean }) => (

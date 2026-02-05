@@ -62,10 +62,11 @@ export default function PlannerPage() {
       deadlines,
       exams: exams.upcoming || [],
       projects,
-      completions: completions.allCompletions, // 🎯 Pass the new data here
+      completions: completions.allCompletions || [], // Ensure this is passed
     });
-  }, [today, exams.upcoming, projects, deadlines, weeklyTasks, exams.loading, projectsLoading, deadlinesLoading, weeklyLoading]);
-
+    // 🎯 ADD 'completions.allCompletions' BELOW!
+  }, [today, exams.upcoming, projects, deadlines, weeklyTasks, exams.loading, projectsLoading, deadlinesLoading, weeklyLoading, completions.allCompletions]);
+  
   if (!activePlan) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">

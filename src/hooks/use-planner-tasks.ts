@@ -13,18 +13,14 @@ export function usePlannerDeadlineTasks() {
     const { data, error } = await supabase
       .from("deadline_tasks")
       .select(`
-        id, 
-        name, 
-        due_date, 
-        estimated_minutes, 
-        status, 
-        subject_id,
+        id, name, due_date, estimated_minutes, status, subject_id,
         subjects!left ( name )
       `)
-      // 🎯 THE PLANNER RULE: Active (any date) OR Completed (today only)
-      .or(`status.eq.active,and(status.eq.completed,due_date.eq.${today})`)
+      // 🎯 THE UPDATED RULE: 
+      // 1. All Active tasks (so the engine can plan ahead)
+      // 2. ANY task marked completed (the engine will filter out the old ones using our 'Exorcism' logic)
+      .or(`status.eq.active,status.eq.completed`) 
       .order("due_date", { ascending: true });
-
     if (error) {
       console.error("Planner Fetch Error:", error.message);
     }
