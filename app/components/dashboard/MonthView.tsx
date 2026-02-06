@@ -59,7 +59,7 @@ export function MonthView({ plan, exams, projects }: MonthViewProps) {
         {calendarDays.map((day) => {
           const isPast = day.date < todayStr;
           const isToday = day.date === todayStr;
-          const isOverloaded = day.totalUsed > day.baseCapacity;
+          const isOverloaded = day.totalPlanned > day.baseCapacity;
 
           // 🎯 THE FIX: Ensure we are filtering the array
           // We normalize strings to prevent timezone/format mismatches
@@ -80,8 +80,8 @@ export function MonthView({ plan, exams, projects }: MonthViewProps) {
                   {new Date(day.date + "T00:00:00").getDate()}
                 </span>
                 
-                {!isPast && day.totalUsed > 0 && (
-                  <div className={`w-2 h-2 rounded-full ${isOverloaded ? 'bg-red-500 animate-pulse' : day.totalUsed / day.baseCapacity > 0.7 ? 'bg-orange-400' : 'bg-emerald-500'}`} />
+                {!isPast && day.totalPlanned > 0 && (
+                  <div className={`w-2 h-2 rounded-full ${isOverloaded ? 'bg-red-500 animate-pulse' : day.totalPlanned / day.baseCapacity > 0.7 ? 'bg-orange-400' : 'bg-emerald-500'}`} />
                 )}
               </div>
 
@@ -102,13 +102,13 @@ export function MonthView({ plan, exams, projects }: MonthViewProps) {
 
               {/* Daily Capacity Progress (Bottom) */}
               <div className="mt-auto pt-1 border-t border-gray-50">
-                {day.totalUsed > 0 && (
+                {day.totalPlanned > 0 && (
                   <div className="flex items-center justify-between gap-1">
                     <p className={`text-[9px] font-black uppercase tracking-tighter ${isOverloaded ? 'text-red-600' : 'text-gray-500'}`}>
-                      {Math.floor(day.totalUsed / 60)}h {day.totalUsed % 60}m
+                      {Math.floor(day.totalPlanned / 60)}h {day.totalPlanned % 60}m
                     </p>
                     <div className="h-1 flex-1 bg-gray-100 rounded-full overflow-hidden">
-                      <div className={`h-full ${isOverloaded ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(100, (day.totalUsed / day.baseCapacity) * 100)}%` }} />
+                      <div className={`h-full ${isOverloaded ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(100, (day.totalPlanned / day.baseCapacity) * 100)}%` }} />
                     </div>
                   </div>
                 )}

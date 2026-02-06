@@ -110,7 +110,7 @@ function DayColumn({ day, isPast, isToday, exams, projects }: {
   const dateObj = new Date(day.date + "T00:00:00");
   const dayName = dateObj.toLocaleDateString("en-GB", { weekday: "short" });
   const dayNum = dateObj.getDate();
-  const isOverloaded = day.totalUsed > day.baseCapacity;
+  const isOverloaded = day.totalPlanned > day.baseCapacity;
 
   // Milestone Filters (Normalization to match dates correctly)
   const dayExams = (exams || []).filter(e => (e.date || e.due_date)?.slice(0, 10) === day.date);
@@ -131,7 +131,7 @@ function DayColumn({ day, isPast, isToday, exams, projects }: {
         <div className="mt-2 h-1.5 w-full rounded-full bg-gray-200/50 overflow-hidden">
           <div
             className={`h-full transition-all duration-700 ${isOverloaded ? "bg-red-500" : "bg-blue-500"}`}
-            style={{ width: `${Math.min(100, (day.totalUsed / day.baseCapacity) * 100)}%` }}
+            style={{ width: `${Math.min(100, (day.totalPlanned / day.baseCapacity) * 100)}%` }}
           />
         </div>
       </div>
@@ -159,7 +159,7 @@ function DayColumn({ day, isPast, isToday, exams, projects }: {
         {day.revision.slots.map((slot, i) => <TaskBlock key={`r-${i}-${day.date}`} label={slot.label} minutes={slot.slotMinutes} type="Rev" subject={slot.subject} color="amber" />)}
         {day.projects.items.map((p) => <TaskBlock key={`p-${p.projectId}`} label={p.name} minutes={p.minutes} type="Proj" subject={p.subject} color="sky" />)}
         
-        {day.totalUsed === 0 && dayExams.length === 0 && dayProjects.length === 0 && (
+        {day.totalPlanned === 0 && dayExams.length === 0 && dayProjects.length === 0 && (
           <div className="py-12 text-center text-[9px] font-black uppercase tracking-tighter text-gray-300 border-2 border-dashed border-gray-100 rounded-xl">
             Rest
           </div>

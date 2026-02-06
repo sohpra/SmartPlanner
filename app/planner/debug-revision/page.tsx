@@ -33,7 +33,7 @@ export default function DebugRevisionPage() {
           <div className="flex justify-between">
             <h2 className="font-medium">{day.date}</h2>
             <div className="text-sm text-gray-600">
-              Total used {day.totalUsed} / {day.baseCapacity} mins
+              Total used {day.totalPlanned} / {day.baseCapacity} mins
             </div>
           </div>
 
