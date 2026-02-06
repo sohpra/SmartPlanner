@@ -27,32 +27,38 @@ export function buildWeekPlan({
   deadlines,
   exams,
   projects,
-  completions = [], // 🎯 Make sure this is received
+  completions = [],
+  capacityData, // 🎯 Receive the new data here
 }: any): WeekPlan {
   const windowDates = Array.from({ length: numDays }, (_, i) => addDays(today, i));
   
-  // 1. Base Capacity (4h weekends, 2.5h weekdays)
+  // 1. Capacity Strategy (Waterfall Logic)
   const baseCapMap: Record<string, number> = {};
 
-  // 🎯 CUSTOMIZER: Change these numbers to adjust your daily "fuel tank"
-  const dailyBudgets: Record<number, number> = {
-    0: 240, // Sunday
-    1: 150, // Monday
-    2: 150, // Tuesday
-    3: 150, // Wednesday
-    4: 150, // Thursday
-    5: 0,  // Friday (Reduced)
-    6: 240, // Saturday
-  };
-
   windowDates.forEach(d => {
-    const dow = new Date(d + "T00:00:00").getDay();
-    // Look up the budget from our map, default to 150 if something goes wrong
-    baseCapMap[d] = dailyBudgets[dow] ?? 150;
+    const dateObj = new Date(d + "T00:00:00");
+    const dow = dateObj.getDay();
+    
+    // Tier 3: Hardcoded Fallback
+    let budget = 150;
+
+    // Tier 2: Global Weekly Pattern (from DB)
+    if (capacityData?.weeklyPattern && capacityData.weeklyPattern[dow] !== undefined) {
+      budget = capacityData.weeklyPattern[dow];
+    }
+
+    // Tier 1: Specific Date Override (Highest Priority - e.g. Half Term)
+    if (capacityData?.dateOverrides && capacityData.dateOverrides[d] !== undefined) {
+      budget = capacityData.dateOverrides[d];
+    }
+
+    baseCapMap[d] = budget;
   });
 
+  // Initialize homework and remaining capacity maps
   const homeworkItems: Record<string, any[]> = {};
   const remainingCap: Record<string, number> = {};
+  
   windowDates.forEach(d => {
     homeworkItems[d] = [];
     remainingCap[d] = baseCapMap[d];

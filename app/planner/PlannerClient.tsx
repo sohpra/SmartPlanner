@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
-import { Rocket, ShieldCheck, Target } from "lucide-react";
+import { Rocket, ShieldCheck, Target, Calendar } from "lucide-react";
 
 // Components
 import DailyChecklist from "../components/checklist/DailyChecklist";
@@ -19,6 +19,7 @@ import { useProjects } from "@/hooks/use-projects";
 import { usePlannerDeadlineTasks } from "@/hooks/use-planner-tasks";
 import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
 import { useDailyCompletions } from "@/hooks/use-daily-completions";
+import { usePlannerCapacity } from "@/hooks/use-planner-capacity"; // 🎯 Added
 
 // Logic
 import { buildWeekPlan } from "@/lib/planner/buildWeekPlan";
@@ -40,7 +41,6 @@ export default function PlannerPage() {
 
   const exams = useExams();
   const { projects = [], isLoading: projectsLoading } = useProjects();
-  // 1. Add 'updateTaskStatusLocally' to the destructuring here
   const { 
     tasks: deadlines = [], 
     isLoading: deadlinesLoading, 
@@ -48,13 +48,15 @@ export default function PlannerPage() {
   } = usePlannerDeadlineTasks();
 
   const { tasks: weeklyTasks = [], isLoading: weeklyLoading } = useWeeklyTasks();
-
-  // 2. Pass 'updateTaskStatusLocally' as the second argument here
   const completions = useDailyCompletions(new Date(), updateTaskStatusLocally);
+  
+  // 🎯 1. Fetch Capacity Data
+  const { capacityData, loading: capacityLoading } = usePlannerCapacity();
 
   const activePlan = useMemo(() => {
-    const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading;
-    if (!isDataLoaded) return null;
+    // 🎯 2. Include capacityLoading in the gatekeeper
+    const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading && !capacityLoading;
+    if (!isDataLoaded || !capacityData) return null;
 
     return buildWeekPlan({
       today,
@@ -63,10 +65,23 @@ export default function PlannerPage() {
       deadlines,
       exams: exams.upcoming || [],
       projects,
-      completions: completions.allCompletions || [], // Ensure this is passed
+      completions: completions.allCompletions || [],
+      capacityData, // 🎯 3. Pass data to engine
     });
-    // 🎯 ADD 'completions.allCompletions' BELOW!
-  }, [today, exams.upcoming, projects, deadlines, weeklyTasks, exams.loading, projectsLoading, deadlinesLoading, weeklyLoading, completions.allCompletions]);
+  }, [
+    today, 
+    exams.upcoming, 
+    projects, 
+    deadlines, 
+    weeklyTasks, 
+    exams.loading, 
+    projectsLoading, 
+    deadlinesLoading, 
+    weeklyLoading, 
+    completions.allCompletions,
+    capacityData,    // 🎯 4. Re-run when capacity changes
+    capacityLoading
+  ]);
   
   if (!activePlan) {
     return (
@@ -125,48 +140,61 @@ export default function PlannerPage() {
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-1">Active Window</p>
                     <h2 className="text-3xl font-black text-gray-900 italic tracking-tighter">Today</h2>
                   </div>
-                  {/* 🎯 SMART RECOVERY & OVERLOAD LOGIC */}
-                  {(() => {
-                    const overage = todayPlan.totalPlanned - todayPlan.baseCapacity;
-                    const hasSignificantOverdue = todayPlan.homework.items
-                      .filter(i => i.isOverdue)
-                      .reduce((sum, i) => sum + i.minutes, 0) >= 30;
 
-                    // Only show if we are actually over capacity
-                    if (overage <= 0) return null;
+                  {/* 🎯 RECOVERY, OVERLOAD & OVERRIDE LOGIC */}
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {(() => {
+                      const overage = todayPlan.totalPlanned - todayPlan.baseCapacity;
+                      const hasSignificantOverdue = todayPlan.homework.items
+                        .filter(i => i.isOverdue)
+                        .reduce((sum, i) => sum + i.minutes, 0) >= 30;
+                      
+                      const todayLabel = capacityData?.labels[today];
+                      const elements = [];
 
-                    if (hasSignificantOverdue) {
-                      return (
-                        <div className="bg-amber-50 border border-amber-100 px-4 py-1.5 rounded-full flex items-center gap-2 animate-in fade-in slide-in-from-right-4">
-                          <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                          <span className="text-amber-700 text-[10px] font-black uppercase italic">
-                            Recovery Mode: +{overage}m Catch-up
-                          </span>
-                        </div>
-                      );
-                    }
+                      // 1. Show Specific Override Label (e.g., Half Term)
+                      if (todayLabel) {
+                        elements.push(
+                          <div key="override" className="bg-blue-600 border border-blue-400 px-4 py-1.5 rounded-full flex items-center gap-2 animate-in fade-in slide-in-from-right-4">
+                            <Calendar className="w-3 h-3 text-white" />
+                            <span className="text-white text-[10px] font-black uppercase italic">
+                              {todayLabel} Mode
+                            </span>
+                          </div>
+                        );
+                      }
 
-                    // Fallback to standard Overload if it's just a heavy planned day (no overdue stuff)
-                    if (overage >= 15) { // Only show standard overload if > 15m
-                      return (
-                        <div className="bg-red-50 border border-red-100 px-4 py-1.5 rounded-full flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                          <span className="text-red-700 text-[10px] font-black uppercase italic">
-                            Overload +{overage}m
-                          </span>
-                        </div>
-                      );
-                    }
+                      // 2. Recovery Mode (Overdue tasks)
+                      if (overage > 0 && hasSignificantOverdue) {
+                        elements.push(
+                          <div key="recovery" className="bg-amber-50 border border-amber-100 px-4 py-1.5 rounded-full flex items-center gap-2">
+                            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                            <span className="text-amber-700 text-[10px] font-black uppercase italic">
+                              Recovery: +{overage}m
+                            </span>
+                          </div>
+                        );
+                      } 
+                      // 3. Standard Overload
+                      else if (overage >= 15) {
+                        elements.push(
+                          <div key="overload" className="bg-red-50 border border-red-100 px-4 py-1.5 rounded-full flex items-center gap-2">
+                            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                            <span className="text-red-700 text-[10px] font-black uppercase italic">
+                              Overload +{overage}m
+                            </span>
+                          </div>
+                        );
+                      }
 
-                    return null;
-                  })()}
+                      return elements;
+                    })()}
+                  </div>
                 </div>
 
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* 1. Completions Card */}
               <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm relative overflow-hidden group">
                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Tasks Completed</p>
-                
                 <div className="flex items-center justify-between">
                   <div className="flex items-baseline gap-1">
                     <p className={`text-5xl font-black transition-colors duration-500 ${
@@ -177,28 +205,20 @@ export default function PlannerPage() {
                     </p>
                     <p className="text-xl font-bold text-slate-300 italic">/ {todayPlan.plannedTaskCount}</p>
                   </div>
-
-                  {/* Status Symbol Logic */}
                   <div className="text-right flex flex-col items-end gap-1">
                     {todayPlan.completedTaskCount > todayPlan.plannedTaskCount ? (
                       <div className="flex flex-col items-end animate-in zoom-in-50 duration-500">
-                        <div className="h-7 w-7 rounded-full bg-emerald-100 flex items-center justify-center mb-1">
-                          <Rocket className="w-4 h-4 text-emerald-600" />
-                        </div>
+                        <div className="h-7 w-7 rounded-full bg-emerald-100 flex items-center justify-center mb-1"><Rocket className="w-4 h-4 text-emerald-600" /></div>
                         <p className="text-[9px] font-black text-emerald-600 uppercase italic tracking-tighter">Way Ahead</p>
                       </div>
                     ) : todayPlan.completedTaskCount === todayPlan.plannedTaskCount && todayPlan.plannedTaskCount > 0 ? (
                       <div className="flex flex-col items-end">
-                        <div className="h-7 w-7 rounded-full bg-blue-100 flex items-center justify-center mb-1">
-                          <ShieldCheck className="w-4 h-4 text-blue-600" />
-                        </div>
+                        <div className="h-7 w-7 rounded-full bg-blue-100 flex items-center justify-center mb-1"><ShieldCheck className="w-4 h-4 text-blue-600" /></div>
                         <p className="text-[9px] font-black text-blue-600 uppercase italic tracking-tighter">Caught Up</p>
                       </div>
                     ) : (
                       <div className="flex flex-col items-end opacity-40">
-                        <div className="h-7 w-7 rounded-full bg-slate-50 flex items-center justify-center mb-1">
-                          <Target className="w-4 h-4 text-slate-400" />
-                        </div>
+                        <div className="h-7 w-7 rounded-full bg-slate-50 flex items-center justify-center mb-1"><Target className="w-4 h-4 text-slate-400" /></div>
                         <p className="text-[9px] font-black text-slate-400 uppercase italic tracking-tighter">Keep Going</p>
                       </div>
                     )}
@@ -206,10 +226,8 @@ export default function PlannerPage() {
                 </div>
               </div>
 
-              {/* 2. Total Load Card */}
               <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm">
                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Study Load</p>
-                
                 <div className="flex flex-col">
                   <div className="flex items-baseline gap-1">
                     <p className={`text-5xl font-black italic transition-colors duration-500 ${
@@ -221,8 +239,6 @@ export default function PlannerPage() {
                       / {Math.floor(todayPlan.totalPlanned / 60)}h{todayPlan.totalPlanned % 60}m
                     </p>
                   </div>
-                  
-                  {/* Progress Bar & Context */}
                   <div className="mt-4 flex flex-col gap-2">
                     <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
                       <div 
@@ -249,7 +265,6 @@ export default function PlannerPage() {
               </div>
             </div>
                 
-                {/* 🎯 TODAY CONTAINER: The Blue Box focus */}
                 <section className="bg-white p-1 rounded-[2.1rem] ring-4 ring-blue-600/10 border border-blue-600/20">
                   <div className="bg-white p-6 rounded-[2rem]">
                     <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-6 flex items-center gap-2">
@@ -275,16 +290,12 @@ export default function PlannerPage() {
             )}    
           </div>
 
-          {/* Sidebar Area */}
           {view === "daily" && (
             <aside className="lg:col-span-4 space-y-6 animate-in fade-in lg:slide-in-from-right-4 duration-500">
-              {/* 🧊 Tomorrow: No more blue box, just clean cards */}
               <div className="bg-white rounded-[2rem] border border-gray-100 p-6 shadow-sm">
                   <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-6">Up Next</h3>
                   <TomorrowChecklist day={tomorrowPlan} />
               </div>
-              
-              {/* 🏁 Milestones: Anchored below tomorrow */}
               <ComingUp projects={projects || []} exams={exams.upcoming || []} />
             </aside>
           )}

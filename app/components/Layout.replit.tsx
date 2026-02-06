@@ -8,7 +8,7 @@ import {
   LayoutDashboard, 
   ClipboardList, 
   GraduationCap, 
-  Settings, 
+  Settings2, 
   LogOut, 
   Zap 
 } from "lucide-react";
@@ -29,7 +29,8 @@ export default function LayoutReplit({ children }: { children: React.ReactNode }
     { name: "Planner", href: "/planner", icon: LayoutDashboard },
     { name: "Tasks", href: "/tasks", icon: ClipboardList },
     { name: "Exams", href: "/exams", icon: GraduationCap },
-  ];
+    { name: "Settings", href: "/settings", icon: Settings2 },
+];
 
   return (
     <div className="flex h-screen bg-white overflow-hidden">
