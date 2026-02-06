@@ -52,6 +52,7 @@ export default function DailyChecklist({ day, completions }: Props) {
   });
 
   // Helper to render a task row
+// Helper to render a task row
   const TaskRow = ({ item, isDone }: { item: any, isDone: boolean }) => (
     <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
       isDone ? "opacity-50 bg-gray-50 border-gray-100 italic" : "bg-white border-gray-200 shadow-sm"
@@ -75,6 +76,13 @@ export default function DailyChecklist({ day, completions }: Props) {
                 {item.subject}
               </span>
             )}
+
+            {/* 🎯 THE OVERDUE BADGE */}
+            {item.isOverdue && !isDone && (
+              <span className="text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-tight bg-red-100 text-red-600 animate-pulse">
+                Overdue
+              </span>
+            )}
           </div>
           <p className="text-[10px] font-bold text-gray-400">
             {item.minutes} mins • <span className="lowercase">{item.section}</span>
@@ -83,7 +91,9 @@ export default function DailyChecklist({ day, completions }: Props) {
       </div>
       
       {item.dueDate && !isDone && (
-        <span className="text-[9px] font-bold bg-gray-100 px-2 py-1 rounded text-gray-500 uppercase">
+        <span className={`text-[9px] font-bold px-2 py-1 rounded uppercase ${
+          item.isOverdue ? "bg-red-50 text-red-400" : "bg-gray-100 text-gray-500"
+        }`}>
           Due {new Date(item.dueDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' })}
         </span>
       )}

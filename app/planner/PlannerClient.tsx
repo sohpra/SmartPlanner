@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
+import { DashboardMetrics } from "../components/dashboard/DashboardMetrics";
 
 // Components
 import DailyChecklist from "../components/checklist/DailyChecklist";
@@ -124,28 +125,46 @@ export default function PlannerPage() {
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-1">Active Window</p>
                     <h2 className="text-3xl font-black text-gray-900 italic tracking-tighter">Today</h2>
                   </div>
-                  {todayPlan.totalUsed > todayPlan.baseCapacity && (
+                  {todayPlan.totalPlanned > todayPlan.baseCapacity && (
                     <div className="bg-red-50 border border-red-100 px-4 py-1.5 rounded-full flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                      <span className="text-red-700 text-[10px] font-black uppercase italic">Overload +{todayPlan.totalUsed - todayPlan.baseCapacity}m</span>
+                      <span className="text-red-700 text-[10px] font-black uppercase italic">
+                        Overload +{todayPlan.totalPlanned - todayPlan.baseCapacity}m
+                      </span>
                     </div>
                   )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
+                  {/* 1. Completions Card */}
                   <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm">
                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Completions</p>
                     <div className="flex items-baseline gap-2">
-                      <p className="text-4xl font-black text-slate-900">{completions.completed.size}</p>
-                      <p className="text-sm font-bold text-slate-300">/ {todayPlan.weekly.items.length + todayPlan.homework.items.length + todayPlan.revision.slots.length}</p>
+                      {/* 🎯 Current Done / Original Goal */}
+                      <p className="text-4xl font-black text-slate-900">
+                        {todayPlan.completedTaskCount}
+                      </p>
+                      <p className="text-sm font-bold text-slate-300">
+                        / {todayPlan.plannedTaskCount}
+                      </p>
                     </div>
                   </div>
 
+                  {/* 2. Total Load Card */}
                   <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm">
                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Total Load</p>
-                    <p className="text-4xl font-black text-slate-900 italic">
-                      {Math.floor(todayPlan.totalUsed / 60)}h <span className="text-xl text-blue-600 tracking-tighter">{todayPlan.totalUsed % 60}m</span>
-                    </p>
+                    <div className="flex flex-col">
+                      <p className="text-4xl font-black text-slate-900 italic">
+                        {Math.floor(todayPlan.totalCompleted / 60)}h 
+                        <span className="text-xl text-blue-600 tracking-tighter">
+                          {todayPlan.totalCompleted % 60}m
+                        </span>
+                      </p>
+                      {/* 🎯 Subtext showing the planned target */}
+                      <p className="text-[10px] font-bold text-gray-300 uppercase tracking-tight mt-1">
+                        Goal: {Math.floor(todayPlan.totalPlanned / 60)}h {todayPlan.totalPlanned % 60}m
+                      </p>
+                    </div>
                   </div>
                 </div>
                 

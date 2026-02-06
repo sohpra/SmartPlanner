@@ -8,11 +8,39 @@ import { useProjects } from "@/hooks/use-projects";
 import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
 import { 
   Trash2, Plus, Repeat, Calendar, Rocket, Clock, 
-  ChevronDown, ChevronRight 
+  ChevronDown, ChevronRight , CheckCircle2
 } from "lucide-react";
+
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const SORTED_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+async function completeTask(task: any) {
+  if (!confirm(`Mark "${task.name}" as done today?`)) return;
+
+  const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  // 1. Mark as completed in the main registry
+  const { error: updateErr } = await supabase
+    .from("deadline_tasks")
+    .update({ status: 'completed' })
+    .eq("id", task.id);
+
+  if (updateErr) return alert(updateErr.message);
+
+  // 2. Log it as a completion for TODAY
+  await supabase.from("daily_completions").insert([{
+    user_id: user.id,
+    source_id: task.id,
+    source_type: 'deadline_task',
+    date: todayStr,
+    task_name: task.name
+  }]);
+
+  window.location.reload();
+}
 
 export default function TasksPage() {
   const [openAddTask, setOpenAddTask] = useState(false);
@@ -25,6 +53,8 @@ export default function TasksPage() {
   const [weeklyTasks, setWeeklyTasks] = useState(weeklyFromHook);
   const [deadlineTasks, setDeadlineTasks] = useState(deadlineFromHook);
   const [projects, setProjects] = useState(projectsFromHook);
+
+  const todayStr = new Date().toISOString().split('T')[0];
 
   useEffect(() => { setWeeklyTasks(weeklyFromHook); }, [weeklyFromHook]);
   
@@ -55,7 +85,10 @@ export default function TasksPage() {
     if (!error) window.location.reload();
   }
 
+
   return (
+
+    
     <div className="max-w-6xl mx-auto p-4 md:p-10 space-y-8 md:space-y-12 pb-24 animate-in fade-in duration-500">
       
       {/* 📋 Header */}
@@ -86,29 +119,67 @@ export default function TasksPage() {
               <h2 className="text-[9px] md:text-[11px] font-black uppercase tracking-widest text-slate-400">Homework</h2>
             </div>
             <div className="space-y-3 md:space-y-4">
-              {deadlineTasks.map((task) => (
-                <div key={task.id} className="group flex items-center justify-between p-4 md:p-6 bg-white border-2 border-slate-100 rounded-[1.5rem] md:rounded-[2rem] hover:border-blue-500/20 transition-all">
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-lg md:text-xl font-black italic tracking-tight text-slate-800">{task.name}</div>
-                      {task.subject && (
-                        <span className="text-[7px] md:text-[9px] font-black uppercase tracking-widest bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-md md:rounded-lg">
-                          {task.subject}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 md:gap-3 text-slate-400 text-[8px] md:text-[9px] font-black uppercase tracking-widest">
-                      <div className="flex items-center gap-1"><Clock className="w-3 h-3" /> {task.estimated_minutes}m</div>
-                      <div className="bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100">
-                        Due {new Date(task.due_date).toLocaleDateString("en-GB", { day: 'numeric', month: 'short' })}
+              {deadlineTasks.map((task) => {
+                // 🎯 STEP 1: Calculate overdue status here for this specific task
+                const isOverdue = task.due_date < todayStr;
+
+                return (
+                  <div 
+                    key={task.id} 
+                    className={`group flex items-center justify-between p-4 md:p-6 bg-white border-2 rounded-[1.5rem] md:rounded-[2rem] transition-all ${
+                      isOverdue ? "border-red-100 bg-red-50/10" : "border-slate-100 hover:border-blue-500/20"
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className={`text-lg md:text-xl font-black italic tracking-tight ${isOverdue ? "text-red-700" : "text-slate-800"}`}>
+                          {task.name}
+                        </div>
+                        
+                        {/* 🎯 STEP 2: The Overdue Badge */}
+                        {isOverdue && (
+                          <span className="text-[7px] md:text-[9px] font-black uppercase tracking-widest bg-red-600 text-white px-2 py-0.5 rounded-md animate-pulse">
+                            Overdue
+                          </span>
+                        )}
+
+                        {task.subject && (
+                          <span className={`text-[7px] md:text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md md:rounded-lg ${
+                            isOverdue ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-600"
+                          }`}>
+                            {task.subject}
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="flex items-center gap-2 md:gap-3 text-slate-400 text-[8px] md:text-[9px] font-black uppercase tracking-widest">
+                        <div className="flex items-center gap-1"><Clock className="w-3 h-3" /> {task.estimated_minutes}m</div>
+                        
+                        {/* 🎯 STEP 3: The Date Chip (turns red if overdue) */}
+                        <div className={`px-2 py-0.5 rounded-md border ${
+                          isOverdue ? "bg-red-50 border-red-200 text-red-600" : "bg-slate-50 border-slate-100 text-slate-400"
+                        }`}>
+                          Due {new Date(task.due_date).toLocaleDateString("en-GB", { day: 'numeric', month: 'short' })}
+                        </div>
                       </div>
                     </div>
+
+                    <div className="flex items-center gap-1 md:gap-2">
+                      <button 
+                        onClick={() => completeTask(task)} 
+                        className="p-2 text-slate-200 hover:text-emerald-500 hover:bg-emerald-50 rounded-xl transition-all"
+                        title="Mark Done Today"
+                      >
+                        <CheckCircle2 className="w-5 h-5" />
+                      </button>
+
+                      <button onClick={() => deleteRow("deadline_tasks", task.id)} className="p-2 text-slate-200 hover:text-red-500 transition-all">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                  <button onClick={() => deleteRow("deadline_tasks", task.id)} className="p-2 text-slate-200 hover:text-red-500 transition-all">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
 

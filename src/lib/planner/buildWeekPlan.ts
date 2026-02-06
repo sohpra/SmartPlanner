@@ -3,11 +3,18 @@ import { planRevisionSlots, addDays, daysBetween, toDateOnly } from "./revisionE
 export type DayPlan = {
   date: string;
   weekly: { minutes: number; items: any[] };
-  homework: { minutes: number; items: any[] };
+  homework: { 
+    minutes: number; 
+    actualCompletedMinutes: number; // 🎯 Added this
+    items: any[] 
+  };
   revision: { minutes: number; slots: any[] };
   projects: { minutes: number; items: any[] };
   baseCapacity: number;
-  totalUsed: number;
+  totalPlanned: number;   // 🎯 Changed from totalUsed
+  totalCompleted: number; // 🎯 Added this
+  plannedTaskCount: number;   // 🎯 Added this
+  completedTaskCount: number; // 🎯 Added this
   spare: number;
 };
 
@@ -120,12 +127,19 @@ export function buildWeekPlan({
       const isToday = date === today;
 
       // 1. Handle Completed Tasks (The "Memory")
+      // 🎯 THE "NO-HYDRA" STABILITY LOCK
       if (task.status === 'completed') {
-        homeworkItems[date].push(mappedTask);
-        // 🎯 LOCK: Keep these minutes subtracted so NOTHING else jumps in.
-        remainingCap[date] -= task.estimated_minutes;
-        assigned = true;
-        break;
+        if (isToday) {
+          // Add to the list so it shows in "Finalized Today"
+          homeworkItems[date].push(mappedTask);
+          
+          // 🛑 NOTICE: We REMOVED "remainingCap[date] -= task.estimated_minutes"
+          // By NOT subtracting minutes, today's 150m budget remains 150m.
+          // This stops the engine from pulling in extra tasks to fill a gap.
+          
+          assigned = true;
+          break;
+        }
       }
 
       // 2. Handle Active Tasks (The "Gatekeeper")
@@ -163,27 +177,44 @@ export function buildWeekPlan({
   });
 
   // 5. Final Assembly
-  const days: DayPlan[] = revisionPlan.days.map(rDay => {
-    const date = rDay.date;
-    
-    // These now include completed items for 'today', keeping the capacity 'full'
-    const weeklyMins = weeklyItems[date].reduce((s, i) => s + i.minutes, 0);
-    const hwMins = homeworkItems[date].reduce((s, i) => s + i.minutes, 0);
-    
-    // totalUsed represents the "committed" time for the day
-    const totalUsed = weeklyMins + hwMins + rDay.usedMinutes;
+// Inside buildWeekPlan.ts -> Final Assembly map function
+const days: DayPlan[] = revisionPlan.days.map(rDay => {
+  const date = rDay.date;
+  
+  const weeklyMins = weeklyItems[date].reduce((s, i) => s + i.minutes, 0);
+  const hwItems = homeworkItems[date];
 
-    return {
-      date,
-      baseCapacity: baseCapMap[date],
-      weekly: { minutes: weeklyMins, items: weeklyItems[date] },
-      homework: { minutes: hwMins, items: homeworkItems[date] },
-      revision: { minutes: rDay.usedMinutes, slots: rDay.slots },
-      projects: { minutes: 0, items: [] }, 
-      totalUsed,
-      spare: Math.max(0, baseCapMap[date] - totalUsed)
-    };
-  });
+  // 🎯 Calculate PLANNED metrics (Stuff actually due today or active)
+  const plannedHwItems = hwItems.filter(i => i.dueDate <= date || i.status === 'active');
+  const plannedHwMins = plannedHwItems.reduce((s, i) => s + i.minutes, 0);
+  
+  // 🎯 Calculate COMPLETED metrics (Regardless of when it was due)
+  const completedHwItems = hwItems.filter(i => i.status === 'completed');
+  const completedHwMins = completedHwItems.reduce((s, i) => s + i.minutes, 0);
+
+  // totalUsed for the 'Planned' Card should be the original goal
+  const totalPlanned = weeklyMins + plannedHwMins + rDay.usedMinutes;
+  // minutesCompleted is everything actually finished
+  const totalCompleted = weeklyMins + completedHwMins + rDay.usedMinutes;
+
+  return {
+    date,
+    baseCapacity: baseCapMap[date],
+    weekly: { minutes: weeklyMins, items: weeklyItems[date] },
+    homework: { 
+      minutes: plannedHwMins, 
+      actualCompletedMinutes: completedHwMins,
+      items: hwItems 
+    },
+    revision: { minutes: rDay.usedMinutes, slots: rDay.slots },
+    projects: { minutes: 0, items: [] }, 
+    totalPlanned, // 🎯 Pass this to the Card
+    totalCompleted, // 🎯 Pass this to the Card
+    plannedTaskCount: weeklyItems[date].length + plannedHwItems.length,
+    completedTaskCount: weeklyItems[date].filter(i => i.isDone).length + completedHwItems.length,
+    spare: Math.max(0, baseCapMap[date] - totalPlanned)
+  };
+});
 
   return { days };
 }
