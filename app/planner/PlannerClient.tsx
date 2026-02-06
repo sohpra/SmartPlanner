@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
-import { DashboardMetrics } from "../components/dashboard/DashboardMetrics";
+import { Rocket, ShieldCheck, Target } from "lucide-react";
 
 // Components
 import DailyChecklist from "../components/checklist/DailyChecklist";
@@ -125,48 +125,129 @@ export default function PlannerPage() {
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-1">Active Window</p>
                     <h2 className="text-3xl font-black text-gray-900 italic tracking-tighter">Today</h2>
                   </div>
-                  {todayPlan.totalPlanned > todayPlan.baseCapacity && (
-                    <div className="bg-red-50 border border-red-100 px-4 py-1.5 rounded-full flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                      <span className="text-red-700 text-[10px] font-black uppercase italic">
-                        Overload +{todayPlan.totalPlanned - todayPlan.baseCapacity}m
-                      </span>
-                    </div>
-                  )}
+                  {/* 🎯 SMART RECOVERY & OVERLOAD LOGIC */}
+                  {(() => {
+                    const overage = todayPlan.totalPlanned - todayPlan.baseCapacity;
+                    const hasSignificantOverdue = todayPlan.homework.items
+                      .filter(i => i.isOverdue)
+                      .reduce((sum, i) => sum + i.minutes, 0) >= 30;
+
+                    // Only show if we are actually over capacity
+                    if (overage <= 0) return null;
+
+                    if (hasSignificantOverdue) {
+                      return (
+                        <div className="bg-amber-50 border border-amber-100 px-4 py-1.5 rounded-full flex items-center gap-2 animate-in fade-in slide-in-from-right-4">
+                          <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                          <span className="text-amber-700 text-[10px] font-black uppercase italic">
+                            Recovery Mode: +{overage}m Catch-up
+                          </span>
+                        </div>
+                      );
+                    }
+
+                    // Fallback to standard Overload if it's just a heavy planned day (no overdue stuff)
+                    if (overage >= 15) { // Only show standard overload if > 15m
+                      return (
+                        <div className="bg-red-50 border border-red-100 px-4 py-1.5 rounded-full flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                          <span className="text-red-700 text-[10px] font-black uppercase italic">
+                            Overload +{overage}m
+                          </span>
+                        </div>
+                      );
+                    }
+
+                    return null;
+                  })()}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  {/* 1. Completions Card */}
-                  <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm">
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Completions</p>
-                    <div className="flex items-baseline gap-2">
-                      {/* 🎯 Current Done / Original Goal */}
-                      <p className="text-4xl font-black text-slate-900">
-                        {todayPlan.completedTaskCount}
-                      </p>
-                      <p className="text-sm font-bold text-slate-300">
-                        / {todayPlan.plannedTaskCount}
-                      </p>
-                    </div>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* 1. Completions Card */}
+              <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm relative overflow-hidden group">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Tasks Completed</p>
+                
+                <div className="flex items-center justify-between">
+                  <div className="flex items-baseline gap-1">
+                    <p className={`text-5xl font-black transition-colors duration-500 ${
+                      todayPlan.completedTaskCount > todayPlan.plannedTaskCount ? 'text-emerald-600' : 
+                      todayPlan.completedTaskCount === todayPlan.plannedTaskCount ? 'text-blue-600' : 'text-slate-900'
+                    }`}>
+                      {todayPlan.completedTaskCount}
+                    </p>
+                    <p className="text-xl font-bold text-slate-300 italic">/ {todayPlan.plannedTaskCount}</p>
                   </div>
 
-                  {/* 2. Total Load Card */}
-                  <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm">
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Total Load</p>
-                    <div className="flex flex-col">
-                      <p className="text-4xl font-black text-slate-900 italic">
-                        {Math.floor(todayPlan.totalCompleted / 60)}h 
-                        <span className="text-xl text-blue-600 tracking-tighter">
-                          {todayPlan.totalCompleted % 60}m
-                        </span>
+                  {/* Status Symbol Logic */}
+                  <div className="text-right flex flex-col items-end gap-1">
+                    {todayPlan.completedTaskCount > todayPlan.plannedTaskCount ? (
+                      <div className="flex flex-col items-end animate-in zoom-in-50 duration-500">
+                        <div className="h-7 w-7 rounded-full bg-emerald-100 flex items-center justify-center mb-1">
+                          <Rocket className="w-4 h-4 text-emerald-600" />
+                        </div>
+                        <p className="text-[9px] font-black text-emerald-600 uppercase italic tracking-tighter">Way Ahead</p>
+                      </div>
+                    ) : todayPlan.completedTaskCount === todayPlan.plannedTaskCount && todayPlan.plannedTaskCount > 0 ? (
+                      <div className="flex flex-col items-end">
+                        <div className="h-7 w-7 rounded-full bg-blue-100 flex items-center justify-center mb-1">
+                          <ShieldCheck className="w-4 h-4 text-blue-600" />
+                        </div>
+                        <p className="text-[9px] font-black text-blue-600 uppercase italic tracking-tighter">Caught Up</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-end opacity-40">
+                        <div className="h-7 w-7 rounded-full bg-slate-50 flex items-center justify-center mb-1">
+                          <Target className="w-4 h-4 text-slate-400" />
+                        </div>
+                        <p className="text-[9px] font-black text-slate-400 uppercase italic tracking-tighter">Keep Going</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Total Load Card */}
+              <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Study Load</p>
+                
+                <div className="flex flex-col">
+                  <div className="flex items-baseline gap-1">
+                    <p className={`text-5xl font-black italic transition-colors duration-500 ${
+                      todayPlan.totalCompleted > todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-900'
+                    }`}>
+                      {Math.floor(todayPlan.totalCompleted / 60)}h<span className="text-2xl">{todayPlan.totalCompleted % 60}m</span>
+                    </p>
+                    <p className="text-xl font-bold text-slate-300 italic">
+                      / {Math.floor(todayPlan.totalPlanned / 60)}h{todayPlan.totalPlanned % 60}m
+                    </p>
+                  </div>
+                  
+                  {/* Progress Bar & Context */}
+                  <div className="mt-4 flex flex-col gap-2">
+                    <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-1000 ease-out ${
+                          todayPlan.totalCompleted > todayPlan.totalPlanned ? 'bg-emerald-500' : 'bg-blue-600'
+                        }`}
+                        style={{ width: `${Math.min(100, (todayPlan.totalCompleted / (todayPlan.totalPlanned || 1)) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <p className={`text-[10px] font-black uppercase italic ${
+                        todayPlan.totalCompleted > todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-500'
+                      }`}>
+                        {todayPlan.totalCompleted > todayPlan.totalPlanned 
+                          ? `Bonus Time: +${todayPlan.totalCompleted - todayPlan.totalPlanned}m` 
+                          : `${Math.round((todayPlan.totalCompleted / (todayPlan.totalPlanned || 1)) * 100)}% of daily target`}
                       </p>
-                      {/* 🎯 Subtext showing the planned target */}
-                      <p className="text-[10px] font-bold text-gray-300 uppercase tracking-tight mt-1">
-                        Goal: {Math.floor(todayPlan.totalPlanned / 60)}h {todayPlan.totalPlanned % 60}m
-                      </p>
+                      <div className="bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-0.5 rounded italic">
+                        Target Locked
+                      </div>
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
                 
                 {/* 🎯 TODAY CONTAINER: The Blue Box focus */}
                 <section className="bg-white p-1 rounded-[2.1rem] ring-4 ring-blue-600/10 border border-blue-600/20">
