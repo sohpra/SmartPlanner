@@ -27,28 +27,18 @@ export default function DailyChecklist({ day, completions }: Props) {
     ...day.projects.items.map(i => ({ ...i, type: "project", section: "Projects" }))
   ];
 
-  // 2. Filter Logic: 
-  // - Deadline Tasks move based on their 'status' property from the DB
-  // - Others move based on the local 'completions' Set
-  // 2. Filter Logic: 
-  // 🎯 THE FIX: Use the SAME logic for both to ensure items don't vanish
-  // 2. Filter Logic: 
-  // 2. Filter Logic: 
+  // 2. Filter Logic: 🎯 TRUST THE LOG
+  // We determine if an item is finished strictly by checking if its unique 
+  // key (type:id) exists in the completions set provided by the hook.
+  
   const activeItems = allPossibleItems.filter(item => {
-    // 🎯 If the DB says it's active, it's active.
-    if (item.type === "deadline_task") {
-      return item.status === 'active';
-    }
-    // For other types, check the local completion set
-    return !completions.completed.has(`${item.type}:${item.id}`);
+    const key = `${item.type}:${item.id}`;
+    return !completions.completed.has(key);
   });
 
   const finishedItems = allPossibleItems.filter(item => {
-    // 🎯 If the DB says it's completed, it's finished.
-    if (item.type === "deadline_task") {
-      return item.status === 'completed';
-    }
-    return completions.completed.has(`${item.type}:${item.id}`);
+    const key = `${item.type}:${item.id}`;
+    return completions.completed.has(key);
   });
 
   // Helper to render a task row
@@ -119,7 +109,7 @@ export default function DailyChecklist({ day, completions }: Props) {
       {finishedItems.length > 0 && (
         <section className="pt-6 border-t border-gray-100">
           <h3 className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em] mb-4 italic">
-            Finalized Today
+            Finalised Today
           </h3>
           <div className="space-y-3">
             {finishedItems.map((item) => (

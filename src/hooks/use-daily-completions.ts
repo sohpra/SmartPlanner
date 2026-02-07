@@ -5,7 +5,6 @@ import { supabase } from "@/lib/supabase/client";
 
 export function useDailyCompletions(date: Date, onStatusChange?: (id: string, status: string) => void) {
   const [completed, setCompleted] = useState<Set<string>>(new Set());
-  // 🎯 Added specific type to avoid 'any' errors
   const [allCompletions, setAllCompletions] = useState<{source_type: string, source_id: string, date: string}[]>([]); 
   const [isLoading, setIsLoading] = useState(true);
   
@@ -19,7 +18,7 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
       return;
     }
 
-    // Fetch all history so we can filter out past completed tasks
+    // Fetch history
     const { data, error } = await supabase
       .from("daily_completions")
       .select("source_type, source_id, date")
@@ -28,7 +27,7 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
     if (!error && data) {
       setAllCompletions(data);
       
-      // Map only today's keys for the UI checkboxes
+      // Map keys for the UI checkboxes
       const keys = data
         .filter((item: any) => item.date === dateKey)
         .map((item: any) => `${item.source_type}:${item.source_id}`);
@@ -48,22 +47,20 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
     const isCurrentlyDone = completed.has(key);
     const newStatus = isCurrentlyDone ? 'active' : 'completed';
 
-    setCompleted((prev) => {
+    // 1. Optimistic Update
+    setCompleted((prev: Set<string>) => {
       const next = new Set(prev);
       if (isCurrentlyDone) next.delete(key);
       else next.add(key);
       return next;
     });
 
-    if (source_type === "deadline_task" && onStatusChange) {
-      onStatusChange(source_id, newStatus);
-    }
-
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
     try {
       if (isCurrentlyDone) {
+        // DELETE Completion
         await supabase.from("daily_completions")
           .delete()
           .eq("user_id", session.user.id)
@@ -71,10 +68,13 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
           .eq("source_id", source_id)
           .eq("date", dateKey);
         
+        // 2. Sync with registry ONLY for deadlines
         if (source_type === "deadline_task") {
           await supabase.from("deadline_tasks").update({ status: 'active' }).eq("id", source_id);
+          if (onStatusChange) onStatusChange(source_id, 'active');
         }
       } else {
+        // INSERT Completion
         await supabase.from("daily_completions").insert({
           user_id: session.user.id,
           source_type,
@@ -82,11 +82,13 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
           date: dateKey,
         });
 
+        // 2. Sync with registry ONLY for deadlines
         if (source_type === "deadline_task") {
           await supabase.from("deadline_tasks").update({ status: 'completed' }).eq("id", source_id);
+          if (onStatusChange) onStatusChange(source_id, 'completed');
         }
       }
-      // Refresh allCompletions after toggle to keep buildWeekPlan in sync
+      // 3. Final Sync
       fetchCompletions(); 
     } catch (err) {
       console.error("Masterplan Sync Error:", err);
@@ -96,8 +98,8 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
 
   return { 
     completed, 
-    allCompletions, // 🎯 Included in return
-    toggleDeadlineTask, // 🎯 Shorthand property fixed
+    allCompletions, 
+    toggleDeadlineTask, 
     dateKey, 
     isLoading, 
     refresh: fetchCompletions 

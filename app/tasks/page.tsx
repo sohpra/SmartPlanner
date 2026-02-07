@@ -18,26 +18,28 @@ const SORTED_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sa
 async function completeTask(task: any) {
   if (!confirm(`Mark "${task.name}" as done today?`)) return;
 
-  const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+  const todayStr = new Date().toISOString().split('T')[0]; 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
 
-  // 1. Mark as completed in the main registry
-  const { error: updateErr } = await supabase
+  // 1. Update Registry
+  await supabase
     .from("deadline_tasks")
     .update({ status: 'completed' })
     .eq("id", task.id);
 
-  if (updateErr) return alert(updateErr.message);
-
-  // 2. Log it as a completion for TODAY
-  await supabase.from("daily_completions").insert([{
+  // 2. Log Completion (FIXED: removed task_name)
+  const { error } = await supabase.from("daily_completions").insert([{
     user_id: user.id,
     source_id: task.id,
     source_type: 'deadline_task',
-    date: todayStr,
-    task_name: task.name
+    date: todayStr
   }]);
+
+  if (error) {
+    console.error("Logging failed:", error.message);
+    alert("Task status updated, but log entry failed: " + error.message);
+  }
 
   window.location.reload();
 }
