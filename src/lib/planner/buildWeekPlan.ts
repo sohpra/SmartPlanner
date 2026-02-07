@@ -1,20 +1,16 @@
-import { planRevisionSlots, addDays, daysBetween, toDateOnly } from "./revisionEngine";
+import { planRevisionSlots, addDays, daysBetween } from "./revisionEngine";
 
 export type DayPlan = {
   date: string;
   weekly: { minutes: number; items: any[] };
-  homework: { 
-    minutes: number; 
-    actualCompletedMinutes: number; // 🎯 Added this
-    items: any[] 
-  };
+  homework: { minutes: number; actualCompletedMinutes: number; items: any[] };
   revision: { minutes: number; slots: any[] };
   projects: { minutes: number; items: any[] };
   baseCapacity: number;
-  totalPlanned: number;   // 🎯 Changed from totalUsed
-  totalCompleted: number; // 🎯 Added this
-  plannedTaskCount: number;   // 🎯 Added this
-  completedTaskCount: number; // 🎯 Added this
+  totalPlanned: number;   
+  totalCompleted: number; 
+  plannedTaskCount: number;   
+  completedTaskCount: number; 
   spare: number;
 };
 
@@ -28,234 +24,176 @@ export function buildWeekPlan({
   exams,
   projects,
   completions = [],
-  capacityData, // 🎯 Receive the new data here
+  capacityData,
 }: any): WeekPlan {
   const windowDates = Array.from({ length: numDays }, (_, i) => addDays(today, i));
   
-  // 1. Capacity Strategy (Waterfall Logic)
+  // 🎯 1. HARMONIZE IDs (Match DailyChecklist.tsx keys)
+  const todayCompletionKeys = new Set<string>();
+  const historicalIds = new Set<string>();
+
+  completions?.forEach((c: any) => {
+    const key = `${c.source_type}:${c.source_id}`;
+    if (c.date === today) {
+      todayCompletionKeys.add(key);
+      todayCompletionKeys.add(c.source_id); 
+    } else if (c.date < today) {
+      historicalIds.add(c.source_id);
+    }
+  });
+
+  // 2. CAPACITY MAP
   const baseCapMap: Record<string, number> = {};
-
   windowDates.forEach(d => {
-    const dateObj = new Date(d + "T00:00:00");
-    const dow = dateObj.getDay();
-    
-    // Tier 3: Hardcoded Fallback
-    let budget = 150;
-
-    // Tier 2: Global Weekly Pattern (from DB)
-    if (capacityData?.weeklyPattern && capacityData.weeklyPattern[dow] !== undefined) {
-      budget = capacityData.weeklyPattern[dow];
-    }
-
-    // Tier 1: Specific Date Override (Highest Priority - e.g. Half Term)
-    if (capacityData?.dateOverrides && capacityData.dateOverrides[d] !== undefined) {
-      budget = capacityData.dateOverrides[d];
-    }
-
+    const dow = new Date(d + "T00:00:00").getDay();
+    let budget = 150; 
+    if (capacityData?.weeklyPattern?.[dow] !== undefined) budget = capacityData.weeklyPattern[dow];
+    if (capacityData?.dateOverrides?.[d] !== undefined) budget = capacityData.dateOverrides[d];
     baseCapMap[d] = budget;
   });
 
-  // Initialize homework and remaining capacity maps
-  const homeworkItems: Record<string, any[]> = {};
-  const remainingCap: Record<string, number> = {};
-  
-  windowDates.forEach(d => {
-    homeworkItems[d] = [];
-    remainingCap[d] = baseCapMap[d];
-  });
-
-  // 2. Weekly Fixed Tasks
+  // 3. WEEKLY ITEMS
   const weeklyItems: Record<string, any[]> = {};
   windowDates.forEach(d => {
     const dow = new Date(d + "T00:00:00").getDay();
-    weeklyItems[d] = weeklyTasks
-      .filter((t: any) => t.day_of_week === dow)
+    weeklyItems[d] = (weeklyTasks || [])
+      .filter((t: any) => t.day_of_week === dow && t.name?.trim())
       .map((t: any) => ({ 
         id: t.id, 
         name: t.name, 
-        subject: t.subject, // ENSURE THIS LINE IS HERE
-        minutes: t.duration_minutes 
+        minutes: t.duration_minutes,
+        isDone: todayCompletionKeys.has(`weekly_task:${t.id}`),
+        type: 'weekly_task' 
       }));
-    
-    const weeklyMins = weeklyItems[d].reduce((sum, item) => sum + item.minutes, 0);
-    remainingCap[d] -= weeklyMins;
   });
 
+  // 4. HOMEWORK (The Iron Curtain Lock)
+  const homeworkItems: Record<string, any[]> = {};
+  const occupiedCap: Record<string, number> = {};
   
-  // --- STEP 3: Homework (Status-Aware & Stability-Locked) ---
-  // --- Homework (Strict Priority Sort) ---
-  const orderedDeadlines = [...deadlines].sort((a, b) => {
-    // Primary Sort: Due Date (Earliest first)
-    const dateDiff = daysBetween(today, a.due_date) - daysBetween(today, b.due_date);
-    if (dateDiff !== 0) return dateDiff;
-
-    // Secondary Sort (Tie-breaker): Minutes (Longest first)
-    // 🎯 This ensures Dr Frost (30m) is evaluated BEFORE Greek (20m)
-    return b.estimated_minutes - a.estimated_minutes;
+  windowDates.forEach(d => {
+    homeworkItems[d] = [];
+    const wkMins = (weeklyItems[d] || []).reduce((sum: number, i: any) => sum + (i.minutes || 0), 0);
+    // 🎯 INITIAL LOAD: Capacity starts at base minus weekly
+    occupiedCap[d] = wkMins; 
   });
 
-  // 1. Identify anything completed PRIOR to today
-  const completedBeforeToday = new Set(
-    completions
-      ?.filter((c: any) => c.date < today)
-      .map((c: any) => c.source_id)
+  const sortedHw = [...(deadlines || [])].sort((a: any, b: any) => 
+    daysBetween(today, a.due_date) - daysBetween(today, b.due_date)
   );
 
-  for (const task of orderedDeadlines) {
-    // 🎯 EXORCISM: If it was finished yesterday or earlier, it stays in the past.
-    if (completedBeforeToday.has(task.id)) {
-      continue; 
-    }
+  for (const task of sortedHw) {
+    const isDoneToday = todayCompletionKeys.has(`deadline_task:${task.id}`);
+    const isDoneHistory = historicalIds.has(task.id) || (task.status === 'completed' && !isDoneToday);
 
-    const mappedTask = { 
+    if (isDoneHistory) continue;
+
+    const mapped = { 
       id: task.id, 
       name: task.name, 
-      subject: task.subjects?.name || task.subject, 
-      dueDate: task.due_date, 
-      minutes: task.estimated_minutes,
-      status: task.status,
-      isOverdue: task.due_date < today
+      subject: task.subject,
+      minutes: task.estimated_minutes, 
+      dueDate: task.due_date,
+      isDone: isDoneToday,
+      type: 'deadline_task'
     };
 
-    // 2. Handle Overdue (Only Active ones reach here now)
-    if (task.due_date < today) {
-      homeworkItems[today].push(mappedTask);
-      // Subtract minutes to keep capacity occupied
-      remainingCap[today] -= task.estimated_minutes;
+    // 🎯 IF IT WAS PLANNED FOR TODAY OR IS DONE TODAY, IT STAYS TODAY
+    if (isDoneToday) {
+      homeworkItems[today].push(mapped);
+      occupiedCap[today] += task.estimated_minutes;
       continue;
     }
 
     const candidates = windowDates.filter(d => d <= task.due_date);
-    if (candidates.length === 0) continue;
-
-    let assigned = false;
-    for (const date of candidates) {
-      const isToday = date === today;
-
-      // 1. Handle Completed Tasks (The "Memory")
-      // 🎯 THE "NO-HYDRA" STABILITY LOCK
-      if (task.status === 'completed') {
-        if (isToday) {
-          // Add to the list so it shows in "Finalized Today"
-          homeworkItems[date].push(mappedTask);
-          
-          // 🛑 NOTICE: We REMOVED "remainingCap[date] -= task.estimated_minutes"
-          // By NOT subtracting minutes, today's 150m budget remains 150m.
-          // This stops the engine from pulling in extra tasks to fill a gap.
-          
-          assigned = true;
-          break;
-        }
+    for (const d of candidates) {
+      // 🎯 THE HYDRA KILLER: We only add if occupiedCap + this task is <= base budget
+      if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
+        homeworkItems[d].push(mapped);
+        occupiedCap[d] += task.estimated_minutes;
+        break;
       }
-
-      // 2. Handle Active Tasks (The "Gatekeeper")
-      // 🎯 THE FIX: If it's Today, and the task doesn't fit PERFECTLY into remainingCap, 
-      // don't pull it in from the future. 
-      if (remainingCap[date] >= task.estimated_minutes) {
-        homeworkItems[date].push(mappedTask);
-        remainingCap[date] -= task.estimated_minutes;
-        assigned = true;
-        break; 
-      }
-      
-      // If we are looking at Today but the task is too big, 
-      // do NOT let it "check" today anymore. Move to the next candidate date.
-      if (isToday) continue; 
-    }
-
-    // 5. Fallback for overflow
-    if (!assigned) {
-      const latestDate = candidates[candidates.length - 1];
-      homeworkItems[latestDate].push(mappedTask);
-      remainingCap[latestDate] -= task.estimated_minutes;
     }
   }
 
-  // 4. Revision (Uses leftover capacity)
+  // 5. REVISION (Static Allocation)
   const revisionCap: Record<string, number> = {};
-  windowDates.forEach(d => revisionCap[d] = Math.max(0, remainingCap[d]));
+  windowDates.forEach(d => revisionCap[d] = Math.max(0, baseCapMap[d] - occupiedCap[d]));
   
-  const revisionPlan = planRevisionSlots(exams, {
-    startDate: today,
-    numDays,
-    capacityByDate: revisionCap,
-    includeExamDay: false,
+  const revisionPlan = planRevisionSlots(exams, { 
+    startDate: today, numDays, capacityByDate: revisionCap, includeExamDay: false 
   });
 
+  // 6. FINAL ASSEMBLY
+// 6. FINAL ASSEMBLY (The "Static 5" Accountant)
+  const days: DayPlan[] = revisionPlan.days.map((rDay: any) => {
+    const d = rDay.date;
+    
+    // 🎯 1. Create the Live Checklist
+    // We map every item we found in the static planning phase to its current status
+    const wk = (weeklyItems[d] || []).map((i: any) => ({
+      ...i,
+      isDone: todayCompletionKeys.has(`weekly_task:${i.id}`)
+    }));
 
-// 5. Final Assembly (Strict Date Mode)
-const days: DayPlan[] = revisionPlan.days.map((rDay: any) => {
-  const date = rDay.date;
-  
-  // 🎯 1. Source of Truth: Only IDs explicitly logged in DB for this date
-  const dateSpecificCompletions = new Set(
-    completions
-      ?.filter((c: any) => c.date === date)
-      .map((c: any) => c.source_id)
-  );
+    const hw = (homeworkItems[d] || []).map((i: any) => ({
+      ...i,
+      isDone: todayCompletionKeys.has(`deadline_task:${i.id}`)
+    }));
 
-  // 🎯 2. Weekly Logic (Strict)
-  const currentWeeklyItems = weeklyItems[date] || [];
-  const weeklyMins = currentWeeklyItems.reduce((s: number, i: any) => s + i.minutes, 0);
-  
-  // Only count weekly items as completed if they are in the log
-  const completedWeeklyItems = currentWeeklyItems.filter((i: any) => dateSpecificCompletions.has(i.id));
-  const completedWeeklyMins = completedWeeklyItems.reduce((s: number, i: any) => s + i.minutes, 0);
+    const rv = (rDay.slots || []).map((s: any) => ({
+      ...s,
+      id: s.examId,
+      minutes: s.slotMinutes || 30,
+      isDone: todayCompletionKeys.has(`revision:${s.examId}`),
+      type: 'revision'
+    }));
 
-  // 🎯 3. Homework Logic (Strict)
-  const hwItems = homeworkItems[date] || [];
+    // 🎯 2. THE DENOMINATOR (The "Locked" 5)
+    // We count the items as they exist in the arrays BEFORE checking completion.
+    // This ensures that even if a task is "Done", it stays in the count.
+    const plannedCount = wk.length + hw.length + rv.length;
 
-  // TARGET: Original plan (Due today or Active)
-  const plannedHwItems = hwItems.filter((i: any) => i.dueDate <= date || i.status === 'active');
-  const plannedHwMins = plannedHwItems.reduce((s: number, i: any) => s + i.minutes, 0);
-  
-  // PROGRESS: Only items from the full 'deadlines' list logged for today
-  const completedHwItems = (deadlines || []).filter((t: any) => dateSpecificCompletions.has(t.id));
-  const completedHwMins = completedHwItems.reduce((s: number, i: any) => s + (i.estimated_minutes || 0), 0);
+    // 🎯 3. THE NUMERATOR (The "Live" 7)
+    // We count EVERYTHING that is marked as isDone.
+    // (Note: If you have bonus tasks from other days, they must be in the 'hw' array for today)
+    const doneCount = wk.filter((i: any) => i.isDone).length + 
+                      hw.filter((i: any) => i.isDone).length + 
+                      rv.filter((i: any) => i.isDone).length;
 
-  // 🎯 4. Final Metric Calculations
-  const totalPlanned = weeklyMins + plannedHwMins + rDay.usedMinutes;
-  const totalCompleted = completedWeeklyMins + completedHwMins + rDay.usedMinutes;
+    // 🎯 4. THE STUDY LOAD (The Blue Bar)
+    const doneMinutes = wk.filter((i: any) => i.isDone).reduce((s: number, i: any) => s + (i.minutes || 0), 0) +
+                        hw.filter((i: any) => i.isDone).reduce((s: number, i: any) => s + (i.minutes || 0), 0) +
+                        rv.filter((i: any) => i.isDone).reduce((s: number, i: any) => s + (i.minutes || 0), 0);
 
-  return {
-    date,
-    baseCapacity: baseCapMap[date],
-    weekly: { 
-      minutes: weeklyMins, 
-      items: currentWeeklyItems.map((i: any) => ({
-        ...i,
-        isDone: dateSpecificCompletions.has(i.id)
-      }))
-    },
-    homework: { 
-      minutes: plannedHwMins, 
-      actualCompletedMinutes: completedHwMins,
-      items: [
-        // Filter out "ghost" completions that aren't in today's log
-        ...hwItems.filter((i: any) => i.status !== 'completed' || dateSpecificCompletions.has(i.id)),
-        
-        // 🚀 Include "Bonus" items (done today, but planned for future)
-        ...completedHwItems
-          .filter((t: any) => !hwItems.some((planned: any) => planned.id === t.id))
-          .map((t: any) => ({
-            id: t.id,
-            name: t.name,
-            subject: t.subjects?.name || t.subject,
-            minutes: t.estimated_minutes,
-            status: 'completed',
-            isBonus: true 
-          }))
-      ]
-    },
-    revision: { minutes: rDay.usedMinutes, slots: rDay.slots },
-    projects: { minutes: 0, items: [] }, 
-    totalPlanned,
-    totalCompleted,
-    plannedTaskCount: currentWeeklyItems.length + plannedHwItems.length,
-    completedTaskCount: completedWeeklyItems.length + completedHwItems.length,
-    spare: Math.max(0, baseCapMap[date] - totalPlanned)
-  };
-});
+    const totalPlannedMins = wk.reduce((s: number, i: any) => s + (i.minutes || 0), 0) +
+                             hw.reduce((s: number, i: any) => s + (i.minutes || 0), 0) +
+                             rv.reduce((s: number, i: any) => s + (i.minutes || 0), 0);
+
+    return {
+      date: d,
+      baseCapacity: baseCapMap[d],
+      weekly: { minutes: wk.reduce((s: number, i: any) => s + (i.minutes || 0), 0), items: wk },
+      homework: { 
+        minutes: hw.reduce((s: number, i: any) => s + (i.minutes || 0), 0), 
+        actualCompletedMinutes: hw.filter((i: any) => i.isDone).reduce((s: number, i: any) => s + (i.minutes || 0), 0), 
+        items: hw 
+      },
+      revision: { minutes: rv.reduce((s: number, i: any) => s + (i.minutes || 0), 0), slots: rv },
+      projects: { minutes: 0, items: [] },
+      
+      // Target bar stays at setting (e.g. 150m)
+      totalPlanned: baseCapMap[d], 
+      totalCompleted: doneMinutes,
+
+      // 📊 Denominator is the length of the lists. 
+      // 📊 Numerator is the count of isDone.
+      plannedTaskCount: plannedCount,   
+      completedTaskCount: doneCount,
+      
+      spare: Math.max(0, baseCapMap[d] - totalPlannedMins)
+    };
+  });
 
   return { days };
 }
