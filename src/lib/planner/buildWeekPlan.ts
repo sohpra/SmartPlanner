@@ -1,10 +1,10 @@
-import { planRevisionSlots, addDays, daysBetween } from "./revisionEngine";
+import { addDays, daysBetween } from "./revisionEngine";
 
 export type DayPlan = {
   date: string;
   weekly: { minutes: number; items: any[] };
   homework: { minutes: number; actualCompletedMinutes: number; items: any[] };
-  revision: { minutes: number; slots: any[] };
+  revision: { minutes: number; items: any[] };
   projects: { minutes: number; items: any[] };
   baseCapacity: number;
   totalPlanned: number;   
@@ -16,6 +16,8 @@ export type DayPlan = {
 
 export type WeekPlan = { days: DayPlan[] };
 
+// ... (imports and types same as your snippet)
+
 export function buildWeekPlan({
   today,
   numDays = 30,
@@ -25,13 +27,13 @@ export function buildWeekPlan({
   projects,
   completions = [],
   capacityData,
+  revisionSlots = [],
 }: any): WeekPlan {
   const windowDates = Array.from({ length: numDays }, (_, i) => addDays(today, i));
   
-  // 🎯 1. HARMONIZE IDs (Match DailyChecklist.tsx keys)
+  // 1. HARMONIZE IDs
   const todayCompletionKeys = new Set<string>();
   const historicalIds = new Set<string>();
-
   completions?.forEach((c: any) => {
     const key = `${c.source_type}:${c.source_id}`;
     if (c.date === today) {
@@ -67,15 +69,12 @@ export function buildWeekPlan({
       }));
   });
 
-  // 4. HOMEWORK (The Iron Curtain Lock)
+  // 4. HOMEWORK
   const homeworkItems: Record<string, any[]> = {};
   const occupiedCap: Record<string, number> = {};
-  
   windowDates.forEach(d => {
     homeworkItems[d] = [];
-    const wkMins = (weeklyItems[d] || []).reduce((sum: number, i: any) => sum + (i.minutes || 0), 0);
-    // 🎯 INITIAL LOAD: Capacity starts at base minus weekly
-    occupiedCap[d] = wkMins; 
+    occupiedCap[d] = (weeklyItems[d] || []).reduce((sum: number, i: any) => sum + (i.minutes || 0), 0);
   });
 
   const sortedHw = [...(deadlines || [])].sort((a: any, b: any) => 
@@ -85,29 +84,26 @@ export function buildWeekPlan({
   for (const task of sortedHw) {
     const isDoneToday = todayCompletionKeys.has(`deadline_task:${task.id}`);
     const isDoneHistory = historicalIds.has(task.id) || (task.status === 'completed' && !isDoneToday);
-
     if (isDoneHistory) continue;
 
     const mapped = { 
       id: task.id, 
       name: task.name, 
-      subject: task.subject,
       minutes: task.estimated_minutes, 
       dueDate: task.due_date,
       isDone: isDoneToday,
-      type: 'deadline_task'
+      type: 'deadline_task',
+      isBonus: isDoneToday && task.due_date > today 
     };
 
-    // 🎯 IF IT WAS PLANNED FOR TODAY OR IS DONE TODAY, IT STAYS TODAY
+    // Hold the seat for today's completed homework to prevent Hydra
     if (isDoneToday) {
       homeworkItems[today].push(mapped);
       occupiedCap[today] += task.estimated_minutes;
       continue;
     }
 
-    const candidates = windowDates.filter(d => d <= task.due_date);
-    for (const d of candidates) {
-      // 🎯 THE HYDRA KILLER: We only add if occupiedCap + this task is <= base budget
+    for (const d of windowDates.filter(date => date <= task.due_date)) {
       if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
         homeworkItems[d].push(mapped);
         occupiedCap[d] += task.estimated_minutes;
@@ -116,84 +112,133 @@ export function buildWeekPlan({
     }
   }
 
-  // 5. REVISION (Static Allocation)
-  const revisionCap: Record<string, number> = {};
-  windowDates.forEach(d => revisionCap[d] = Math.max(0, baseCapMap[d] - occupiedCap[d]));
+// 5. REVISION (The Iron-Clad Unified Architect)
+const revisionItems: Record<string, any[]> = {};
+windowDates.forEach(d => revisionItems[d] = []);
+
+const allSlots = (revisionSlots || []) as any[];
+
+const doneSlots = allSlots.filter(s => todayCompletionKeys.has(`revision:${s.id}`));
+const pendingSlots = allSlots.filter(s => !todayCompletionKeys.has(`revision:${s.id}`));
+
+// --- STEP 1: Process Done Items ONCE (The Hydra Guard) ---
+doneSlots.forEach(s => {
+  if (revisionItems[today]) {
+    const mins = s.duration_minutes || 60;
+    revisionItems[today].push({ 
+      ...s, 
+      name: s.displayName || s.description || "Revision",
+      type: 'revision', 
+      isDone: true, 
+      minutes: mins 
+    });
+    occupiedCap[today] += mins; // This holds the seat and stops the Hydra
+  }
+});
+
+const bigBlocks = pendingSlots.filter(s => 
+  (s.duration_minutes || 0) >= 120 || 
+  (s.displayName || "").includes("FINAL")
+);
+
+const drillSlots = pendingSlots.filter(s => 
+  (s.duration_minutes || 0) < 120 && 
+  !(s.displayName || "").includes("FINAL")
+);
+
+// --- STEP 2: Place Big Blocks (Exam Eve Anchor) ---
+bigBlocks.forEach(slot => {
+  const rawExamDate = slot.exam?.date || slot.date;
+  const examDate = rawExamDate ? String(rawExamDate).split('T')[0] : null;
+  const eligibleDates = windowDates.filter(d => !examDate || d < examDate);
+  if (eligibleDates.length === 0) return;
+
+  const examEve = eligibleDates[eligibleDates.length - 1];
+  const mins = slot.duration_minutes || 120;
   
-  const revisionPlan = planRevisionSlots(exams, { 
-    startDate: today, numDays, capacityByDate: revisionCap, includeExamDay: false 
+  revisionItems[examEve].push({
+    id: slot.id,
+    name: slot.displayName || "Final Prep",
+    subject: slot.subject || slot.exam?.subject || "Revision",
+    minutes: mins,
+    isDone: false,
+    type: 'revision'
   });
+  occupiedCap[examEve] += mins;
+});
 
-  // 6. FINAL ASSEMBLY
-// 6. FINAL ASSEMBLY (The "Static 5" Accountant)
-  const days: DayPlan[] = revisionPlan.days.map((rDay: any) => {
-    const d = rDay.date;
-    
-    // 🎯 1. Create the Live Checklist
-    // We map every item we found in the static planning phase to its current status
-    const wk = (weeklyItems[d] || []).map((i: any) => ({
-      ...i,
-      isDone: todayCompletionKeys.has(`weekly_task:${i.id}`)
-    }));
+// --- STEP 3: Place Drill Slots (Aggressive Fill with Capacity Guard) ---
+drillSlots.forEach(slot => {
+  const rawExamDate = slot.exam?.date || slot.date;
+  const examDate = rawExamDate ? String(rawExamDate).split('T')[0] : null;
+  const eligibleDates = windowDates.filter(d => !examDate || d < examDate);
+  const mins = slot.duration_minutes || 60;
 
-    const hw = (homeworkItems[d] || []).map((i: any) => ({
-      ...i,
-      isDone: todayCompletionKeys.has(`deadline_task:${i.id}`)
-    }));
+  let placed = false;
+  for (const d of eligibleDates) {
+    const isToday = d === today;
+    const maxDrills = 3;
+    const currentRevCount = revisionItems[d].length;
 
-    const rv = (rDay.slots || []).map((s: any) => ({
-      ...s,
-      id: s.examId,
-      minutes: s.slotMinutes || 30,
-      isDone: todayCompletionKeys.has(`revision:${s.examId}`),
+    // Check capacity and respect the 3-drill limit for Today
+    if (occupiedCap[d] + mins <= baseCapMap[d] && (!isToday || currentRevCount < maxDrills)) {
+      revisionItems[d].push({
+        id: slot.id,
+        name: slot.displayName || "Revision",
+        subject: slot.subject || slot.exam?.subject || "Revision",
+        minutes: mins,
+        isDone: false,
+        type: 'revision'
+      });
+      occupiedCap[d] += mins;
+      placed = true;
+      break;
+    }
+  }
+
+  // --- STEP 4: Overload Fallback (Force to Wednesday/Exam Eve) ---
+  if (!placed && eligibleDates.length > 0) {
+    const examEve = eligibleDates[eligibleDates.length - 1];
+    revisionItems[examEve].push({
+      id: slot.id,
+      name: slot.displayName || slot.description || "Revision",
+      subject: slot.subject || slot.exam?.subject || "General",
+      minutes: mins,
+      isDone: false,
       type: 'revision'
-    }));
+    });
+    occupiedCap[examEve] += mins;
+  }
+});
 
-    // 🎯 2. THE DENOMINATOR (The "Locked" 5)
-    // We count the items as they exist in the arrays BEFORE checking completion.
-    // This ensures that even if a task is "Done", it stays in the count.
-    const plannedCount = wk.length + hw.length + rv.length;
+// 6. FINAL ASSEMBLY (Stable Progress Logic)
+const days: DayPlan[] = windowDates.map((d: string) => {
+  const wk = weeklyItems[d] || [];
+  const hw = homeworkItems[d] || [];
+  const rv = revisionItems[d] || [];
+  const allItems = [...wk, ...hw, ...rv];
+  
+  const dayTotalPlannedMinutes = allItems.reduce((sum, i) => sum + (i.minutes || 0), 0);
+  const dayTotalDoneMinutes = allItems.filter(i => i.isDone).reduce((sum, i) => sum + (i.minutes || 0), 0);
 
-    // 🎯 3. THE NUMERATOR (The "Live" 7)
-    // We count EVERYTHING that is marked as isDone.
-    // (Note: If you have bonus tasks from other days, they must be in the 'hw' array for today)
-    const doneCount = wk.filter((i: any) => i.isDone).length + 
-                      hw.filter((i: any) => i.isDone).length + 
-                      rv.filter((i: any) => i.isDone).length;
-
-    // 🎯 4. THE STUDY LOAD (The Blue Bar)
-    const doneMinutes = wk.filter((i: any) => i.isDone).reduce((s: number, i: any) => s + (i.minutes || 0), 0) +
-                        hw.filter((i: any) => i.isDone).reduce((s: number, i: any) => s + (i.minutes || 0), 0) +
-                        rv.filter((i: any) => i.isDone).reduce((s: number, i: any) => s + (i.minutes || 0), 0);
-
-    const totalPlannedMins = wk.reduce((s: number, i: any) => s + (i.minutes || 0), 0) +
-                             hw.reduce((s: number, i: any) => s + (i.minutes || 0), 0) +
-                             rv.reduce((s: number, i: any) => s + (i.minutes || 0), 0);
-
-    return {
-      date: d,
-      baseCapacity: baseCapMap[d],
-      weekly: { minutes: wk.reduce((s: number, i: any) => s + (i.minutes || 0), 0), items: wk },
-      homework: { 
-        minutes: hw.reduce((s: number, i: any) => s + (i.minutes || 0), 0), 
-        actualCompletedMinutes: hw.filter((i: any) => i.isDone).reduce((s: number, i: any) => s + (i.minutes || 0), 0), 
-        items: hw 
-      },
-      revision: { minutes: rv.reduce((s: number, i: any) => s + (i.minutes || 0), 0), slots: rv },
-      projects: { minutes: 0, items: [] },
-      
-      // Target bar stays at setting (e.g. 150m)
-      totalPlanned: baseCapMap[d], 
-      totalCompleted: doneMinutes,
-
-      // 📊 Denominator is the length of the lists. 
-      // 📊 Numerator is the count of isDone.
-      plannedTaskCount: plannedCount,   
-      completedTaskCount: doneCount,
-      
-      spare: Math.max(0, baseCapMap[d] - totalPlannedMins)
-    };
-  });
+  return {
+    date: d,
+    baseCapacity: baseCapMap[d],
+    weekly: { minutes: wk.reduce((s, i) => s + (i.minutes || 0), 0), items: wk },
+    homework: { 
+      minutes: hw.reduce((s, i) => s + (i.minutes || 0), 0), 
+      actualCompletedMinutes: hw.filter(i => i.isDone).reduce((s, i) => s + (i.minutes || 0), 0), 
+      items: hw 
+    },
+    revision: { minutes: rv.reduce((s, i) => s + (i.minutes || 0), 0), items: rv },
+    projects: { minutes: 0, items: [] },
+    totalPlanned: dayTotalPlannedMinutes, 
+    totalCompleted: dayTotalDoneMinutes,
+    plannedTaskCount: allItems.length,   
+    completedTaskCount: allItems.filter(i => i.isDone).length,
+    spare: Math.max(0, baseCapMap[d] - dayTotalPlannedMinutes)
+  };
+});
 
   return { days };
 }

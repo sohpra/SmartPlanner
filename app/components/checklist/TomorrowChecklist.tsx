@@ -7,18 +7,15 @@ export function TomorrowChecklist({ day }: { day: DayPlan }) {
   const tomorrowItems = [
     ...day.homework.items.map(i => ({ ...i, category: 'Homework' })),
     ...day.weekly.items.map(i => ({ ...i, category: 'Weekly' })),
-    ...day.revision.slots.map(s => {
-      // 🎯 LOGIC: If it's a competitive exam, use the specific name as the primary title
-      // We assume s.exam contains the metadata from the join
-      const isCompetitive = s.exam?.exam_type === 'Competitive' || s.exam?.exam_type === 'Board';
-      const specificName = s.exam?.competitive_exam_name || s.exam?.exam_board;
-      
-      return { 
-        name: isCompetitive && specificName ? specificName : s.label, 
-        minutes: s.slotMinutes, 
-        subject: s.subject, 
-        category: 'Revision' 
-      };
+    ...(day.revision.items || []).map(s => {
+    // Since buildWeekPlan already handled the naming logic, 
+    // we can use s.name (which contains the Olympiad/Board name)
+    return {
+      ...s,
+      category: 'Revision',
+      // Ensure we have a fallback name
+      name: s.name || `Revision: ${s.subject}` 
+    };
     })
   ];
 

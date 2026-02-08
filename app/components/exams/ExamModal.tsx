@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useSubjects } from "@/hooks/use-subjects";
+import { syncRevisionSlots } from "@/lib/planner/revisionPersistence";
 import { X, Sparkles, PencilLine } from "lucide-react";
 
 export function ExamModal({ open, onClose, onAdded }: any) {
@@ -29,52 +30,57 @@ export function ExamModal({ open, onClose, onAdded }: any) {
   if (!open) return null;
 
 async function handleSubmit() {
+  // 1. Validation
   if (!subject || !date) return;
+  
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  if (!user) {
+    alert("User session not found. Please log in again.");
+    return;
+  }
 
-  // 🎯 1. Define the full allowed shape for the database
-  type ExamPayload = {
-    user_id: string;
-    subject: string;
-    exam_type: string;
-    date: string;
-    preparedness: number;
-    topics?: string;
-    exam_board?: string;
-    competitive_exam_name?: string;
-  };
+  // 2. Build the Payload matching your Schema
+  // We use charAt/slice to ensure 'Internal', 'Board', or 'Competitive' matches the CHECK constraint
+  const formattedType = examType.charAt(0).toUpperCase() + examType.slice(1);
 
-  const base = {
+  const payload: any = {
     user_id: user.id,
     subject,
-    exam_type: examType.charAt(0).toUpperCase() + examType.slice(1),
-    date,
+    exam_type: formattedType,
+    date: new Date(date).toISOString(), // Ensure ISO format for timestamptz
     preparedness,
+    topics: examType === "internal" ? topicInput : null,
+    exam_board: examType === "board" ? examBoard : null,
+    competitive_exam_name: examType === "competitive" ? examName : null,
+    color: "#3b82f6", // Default blue from your schema
   };
 
-  // 🎯 2. Explicitly type the payload
-  let payload: ExamPayload = { ...base };
+  try {
+    // 3. Insert the Exam and get the ID back
+    const { data: newExam, error: examError } = await supabase
+      .from("exams")
+      .insert([payload])
+      .select()
+      .single();
 
-  if (examType === "internal") {
-    payload.topics = topicInput ;
-  } else if (examType === "board") {
-    payload.exam_board = examBoard;
-  } else if (examType === "competitive") {
-    payload.competitive_exam_name = examName;
-  }
+    if (examError) throw examError;
 
-  const { error } = await supabase.from("exams").insert([payload]); // Wrapped in array for Supabase best practice
-  
-  if (error) {
-    console.error("Supabase Error:", error);
-    alert(error.message);
-  } else {
+    // 4. Trigger Revision Slot Generation
+    // We call the persistence utility to create the rows in public.revision_slots
+    // This "anchors" the work so it doesn't move on the dashboard later.
+    if (newExam) {
+      await syncRevisionSlots(newExam);
+    }
+
+    // 5. Success Handlers
     onAdded?.(); 
     onClose();
+    
+  } catch (error: any) {
+    console.error("Submission Error:", error);
+    alert(`Failed to save exam: ${error.message}`);
   }
 }
-
   return (
     <div className="fixed inset-0 z-[110] flex items-end md:items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
       <div className="w-full max-w-xl bg-white rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in slide-in-from-bottom md:zoom-in-95 duration-300 max-h-[95vh] overflow-y-auto">

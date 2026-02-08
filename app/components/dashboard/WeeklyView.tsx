@@ -13,7 +13,6 @@ type Props = {
 export function WeeklyView({ plan, exams, projects }: Props) {
   const [weekOffset, setWeekOffset] = useState(0);
 
-  // 1. ANCHOR TO MONDAY: Logic to ensure Monday is always Column 1
   const visibleDays = useMemo(() => {
     const today = new Date();
     const dayOfWeek = today.getDay(); 
@@ -35,16 +34,17 @@ export function WeeklyView({ plan, exams, projects }: Props) {
       if (planDay) {
         weekWindow.push(planDay);
       } else {
-        // Skeleton for dates outside the engine window
+        // 🎯 FIX: Updated Skeleton to match the new DayPlan schema (items instead of slots)
         weekWindow.push({
           date: dateStr,
-          totalUsed: 0,
-          baseCapacity: 180, 
-          spare: 180,
-          weekly: { items: [] },
-          homework: { items: [] },
-          revision: { slots: [] },
-          projects: { items: [] }
+          totalPlanned: 0,
+          totalCompleted: 0,
+          baseCapacity: 150, 
+          spare: 150,
+          weekly: { minutes: 0, items: [] },
+          homework: { minutes: 0, items: [] },
+          revision: { minutes: 0, items: [] }, // Changed from slots: []
+          projects: { minutes: 0, items: [] }
         } as unknown as DayPlan);
       }
     }
@@ -55,7 +55,6 @@ export function WeeklyView({ plan, exams, projects }: Props) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      {/* 🧭 Header with Navigation */}
       <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
@@ -81,7 +80,6 @@ export function WeeklyView({ plan, exams, projects }: Props) {
         </div>
       </div>
 
-      {/* 📅 Grid */}
       <div className="w-full overflow-x-auto pb-4 custom-scrollbar">
         <div className="grid grid-cols-7 gap-4 min-w-[1000px]">
           {visibleDays.map((day) => (
@@ -112,7 +110,6 @@ function DayColumn({ day, isPast, isToday, exams, projects }: {
   const dayNum = dateObj.getDate();
   const isOverloaded = day.totalPlanned > day.baseCapacity;
 
-  // Milestone Filters (Normalization to match dates correctly)
   const dayExams = (exams || []).filter(e => (e.date || e.due_date)?.slice(0, 10) === day.date);
   const dayProjects = (projects || []).filter(p => (p.due_date || p.date)?.slice(0, 10) === day.date);
 
@@ -136,7 +133,6 @@ function DayColumn({ day, isPast, isToday, exams, projects }: {
         </div>
       </div>
 
-      {/* 🚀 Milestones (Amber for Exams, Blue for Projects) */}
       {(dayExams.length > 0 || dayProjects.length > 0) && (
         <div className="flex flex-col gap-1 px-1">
           {dayExams.map((exam, i) => (
@@ -152,11 +148,23 @@ function DayColumn({ day, isPast, isToday, exams, projects }: {
         </div>
       )}
 
-      {/* Task List */}
       <div className="flex flex-col gap-2">
         {day.weekly.items.map((item) => <TaskBlock key={`w-${item.id}`} label={item.name} minutes={item.minutes} type="Weekly" color="indigo" />)}
         {day.homework.items.map((item) => <TaskBlock key={`h-${item.id}`} label={item.name} minutes={item.minutes} type="Hwk" subject={item.subject} color="emerald" />)}
-        {day.revision.slots.map((slot, i) => <TaskBlock key={`r-${i}-${day.date}`} label={slot.label} minutes={slot.slotMinutes} type="Rev" subject={slot.subject} color="amber" />)}
+        
+        {/* 🎯 FIX: Changed day.revision.slots to day.revision.items */}
+        {day.revision.items.map((item, i) => (
+        <TaskBlock 
+          key={`rev-${item.id || i}`} 
+          // 🎯 Use both fallbacks to ensure the text appears
+          label={item.label || item.name || "Revision"} 
+          minutes={item.minutes} 
+          type="Rev" 
+          subject={item.subject} 
+          color="amber" 
+        /> 
+      ))}
+
         {day.projects.items.map((p) => <TaskBlock key={`p-${p.projectId}`} label={p.name} minutes={p.minutes} type="Proj" subject={p.subject} color="sky" />)}
         
         {day.totalPlanned === 0 && dayExams.length === 0 && dayProjects.length === 0 && (

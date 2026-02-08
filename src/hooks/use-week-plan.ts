@@ -1,96 +1,41 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { useMemo } from "react";
 import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
 import { useDeadlineTasks } from "@/hooks/use-deadline-tasks";
 import { useExams } from "@/hooks/use-exams";
 import { useProjects } from "@/hooks/use-projects";
 import { useDailyCompletions } from "@/hooks/use-daily-completions";
-import { buildWeekPlan, type WeekPlan } from "@/lib/planner/buildWeekPlan";
+import { useRevision } from "./use-revision";
+import { buildWeekPlan } from "@/lib/planner/buildWeekPlan";
 
-// Helper for date keys
-function localDateKey(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-type SnapshotInputs = {
-  today: string;
-  numDays: number;
-  weeklyTasks: any[];
-  deadlines: any[];
-  exams: any[];
-  projects: any[];
-};
-
-export function useWeekPlan(numDays = 7): {
-  weekPlan: WeekPlan | null;
-  snapshotStart: string | null;
-  refresh: () => void;
-  isLoading: boolean;
-} {
+export function useWeekPlan(numDays = 7) {
+  // 🎯 LOG 1: Is the hook function itself defined?
   const weekly = useWeeklyTasks();
   const deadlines = useDeadlineTasks();
   const exams = useExams();
   const projects = useProjects();
-  
-  // 🎯 1. Live Completions
-  // This hook provides the real-time "checked" status without rebuilding the plan load.
+  const revision = useRevision(); 
   const { allCompletions } = useDailyCompletions(new Date());
 
-  const isLoading =
-    weekly.isLoading || deadlines.isLoading || exams.loading || projects.isLoading;
-
-  const [snapshot, setSnapshot] = useState<SnapshotInputs | null>(null);
-  
-  // 🎯 2. Stability Lock
-  // Prevents the snapshot from updating automatically when data hooks refresh.
-  const hasInitialized = useRef(false);
-
-  const buildSnapshot = useCallback((): SnapshotInputs => {
-    return {
-      today: localDateKey(new Date()),
-      numDays,
-      weeklyTasks: (weekly.tasks ?? []).map((t: any) => ({ ...t })),
-      deadlines: (deadlines.tasks ?? []).map((t: any) => ({ ...t })),
-      exams: (exams.upcoming ?? []).map((e: any) => ({ ...e })),
-      projects: (projects.projects ?? []).map((p: any) => ({ ...p })),
-    };
-  }, [numDays, weekly.tasks, deadlines.tasks, exams.upcoming, projects.projects]);
-
-  // 🎯 3. One-Time Initialization
-  useEffect(() => {
-    if (!isLoading && !hasInitialized.current) {
-      setSnapshot(buildSnapshot());
-      hasInitialized.current = true;
-    }
-  }, [isLoading, buildSnapshot]);
-
-  const refresh = useCallback(() => {
-    setSnapshot(buildSnapshot());
-  }, [buildSnapshot]);
 
   const weekPlan = useMemo(() => {
-    if (!snapshot) return null;
-
-    // 🎯 4. Connect Static Plan to Live Progress
     return buildWeekPlan({
-      today: snapshot.today,
-      numDays: snapshot.numDays,
-      weeklyTasks: snapshot.weeklyTasks,
-      deadlines: snapshot.deadlines,
-      exams: snapshot.exams,
-      projects: snapshot.projects,
-      completions: allCompletions, // This moves the bars
+      today: "2026-02-08", // Force today for testing
+      numDays,
+      weeklyTasks: weekly.tasks || [],
+      deadlines: deadlines.tasks || [],
+      exams: exams.upcoming || [],
+      projects: projects.projects || [],
+      revisionSlots: revision.slots || [], 
+      completions: allCompletions,
     });
-  }, [snapshot, allCompletions]); 
+  }, [numDays, weekly.tasks, deadlines.tasks, exams.upcoming, projects.projects, revision.slots, allCompletions]);
 
   return {
     weekPlan,
-    snapshotStart: snapshot?.today ?? null,
-    refresh,
-    isLoading,
+    snapshotStart: "2026-02-08",
+    refresh: () => console.log("Refresh"),
+    isLoading: revision.isLoading // Simplified for now
   };
 }

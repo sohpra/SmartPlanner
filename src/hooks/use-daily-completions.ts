@@ -40,61 +40,83 @@ export function useDailyCompletions(date: Date, onStatusChange?: (id: string, st
     fetchCompletions();
   }, [fetchCompletions]);
 
-  const toggleDeadlineTask = useCallback(async (source_type: string, source_id: string) => {
-    if (!source_id || source_id === source_type) return;
+const toggleDeadlineTask = useCallback(async (source_type: string, source_id: string) => {
+  if (!source_id || source_id === source_type) return;
 
-    const key = `${source_type}:${source_id}`;
-    const isCurrentlyDone = completed.has(key);
-    const newStatus = isCurrentlyDone ? 'active' : 'completed';
+  const key = `${source_type}:${source_id}`;
+  const isCurrentlyDone = completed.has(key);
+  
+  // 1. UI Optimism
+  setCompleted((prev) => {
+    const next = new Set(prev);
+    if (isCurrentlyDone) next.delete(key);
+    else next.add(key);
+    return next;
+  });
 
-    // 1. Optimistic Update
-    setCompleted((prev: Set<string>) => {
-      const next = new Set(prev);
-      if (isCurrentlyDone) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    console.error("❌ AUTH ERROR: No session found");
+    return;
+  }
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+  const userId = session.user.id;
 
-    try {
-      if (isCurrentlyDone) {
-        // DELETE Completion
-        await supabase.from("daily_completions")
-          .delete()
-          .eq("user_id", session.user.id)
-          .eq("source_type", source_type)
-          .eq("source_id", source_id)
-          .eq("date", dateKey);
-        
-        // 2. Sync with registry ONLY for deadlines
-        if (source_type === "deadline_task") {
-          await supabase.from("deadline_tasks").update({ status: 'active' }).eq("id", source_id);
-          if (onStatusChange) onStatusChange(source_id, 'active');
-        }
-      } else {
-        // INSERT Completion
-        await supabase.from("daily_completions").insert({
-          user_id: session.user.id,
-          source_type,
-          source_id,
-          date: dateKey,
-        });
+  try {
+    if (isCurrentlyDone) {
+      // --- REMOVE COMPLETION ---
+      // 1. Delete from ledger
+      const { error: dcErr } = await supabase
+        .from("daily_completions")
+        .delete()
+        .match({ user_id: userId, source_type, source_id, date: dateKey });
+      
+      if (dcErr) throw dcErr;
 
-        // 2. Sync with registry ONLY for deadlines
-        if (source_type === "deadline_task") {
-          await supabase.from("deadline_tasks").update({ status: 'completed' }).eq("id", source_id);
-          if (onStatusChange) onStatusChange(source_id, 'completed');
-        }
+      // 2. Specific Table Updates
+      if (source_type === "revision") {
+        const { error: revErr } = await supabase
+          .from("revision_slots")
+          .update({ is_completed: false })
+          .match({ id: source_id, user_id: userId }); // Match both for RLS
+        if (revErr) throw revErr;
       }
-      // 3. Final Sync
-      fetchCompletions(); 
-    } catch (err) {
-      console.error("Masterplan Sync Error:", err);
-      fetchCompletions();
+
+      if (source_type === "deadline_task") {
+        await supabase.from("deadline_tasks").update({ status: 'active' }).eq("id", source_id);
+        if (onStatusChange) onStatusChange(source_id, 'active');
+      }
+
+    } else {
+      // --- ADD COMPLETION ---
+      // 1. Insert into ledger
+      const { error: dcErr } = await supabase
+        .from("daily_completions")
+        .insert({ user_id: userId, source_type, source_id, date: dateKey });
+      
+      if (dcErr) throw dcErr;
+
+      // 2. Specific Table Updates
+      if (source_type === "revision") {
+        const { error: revErr } = await supabase
+          .from("revision_slots")
+          .update({ is_completed: true })
+          .match({ id: source_id, user_id: userId });
+        if (revErr) throw revErr;
+      }
+
+      if (source_type === "deadline_task") {
+        await supabase.from("deadline_tasks").update({ status: 'completed' }).eq("id", source_id);
+        if (onStatusChange) onStatusChange(source_id, 'completed');
+      }
     }
-  }, [completed, dateKey, fetchCompletions, onStatusChange]);
+
+    fetchCompletions(); 
+  } catch (err: any) {
+    console.error("❌ DATABASE SYNC ERROR:", err.message || err);
+    fetchCompletions(); // Rollback UI
+  }
+}, [completed, dateKey, fetchCompletions, onStatusChange]);
 
   return { 
     completed, 

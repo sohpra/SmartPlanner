@@ -18,19 +18,26 @@ export default function ExamsPage() {
       .filter((e) => (e.date ?? "").slice(0, 10) >= todayStr);
   }, [upcoming, hiddenIds]);
 
-  async function deleteExam(id: string) {
-    if (!confirm("Remove this exam from your roadmap?")) return;
-    setHiddenIds((prev) => new Set(prev).add(id));
-    const { error } = await supabase.from("exams").delete().eq("id", id);
-    if (error) {
-      alert(error.message);
-      setHiddenIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    }
+async function deleteExam(id: string) {
+  if (!confirm("Remove this exam and all scheduled revision?")) return;
+  
+  // Optimistic UI update
+  setHiddenIds((prev) => new Set(prev).add(id));
+
+  // 🎯 Delete the exam. 
+  // If your DB has "ON DELETE CASCADE", the slots die automatically.
+  // If not, delete slots manually first:
+  await supabase.from("revision_slots").delete().eq("exam_id", id);
+  
+  const { error } = await supabase.from("exams").delete().eq("id", id);
+  
+  if (error) {
+    alert(error.message);
+    // Rollback hidden UI on error...
+  } else {
+    refresh();
   }
+}
 
   return (
     <div className="max-w-5xl mx-auto p-4 md:p-10 space-y-6 md:space-y-10 pb-24 animate-in fade-in duration-500">

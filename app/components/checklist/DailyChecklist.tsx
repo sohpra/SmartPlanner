@@ -16,21 +16,20 @@ export default function DailyChecklist({ day, completions }: Props) {
   const allPossibleItems = [
     ...day.homework.items.map(i => ({ ...i, type: "deadline_task", section: "Homework" })),
     ...day.weekly.items.map(i => ({ ...i, type: "weekly_task", section: "Weekly Tasks" })),
-    ...day.revision.slots.map(s => ({ 
-      id: s.examId, 
-      name: s.label, 
+    // 🎯 FIX: Map stored revision slots using their OWN id, not the examId
+    ...day.revision.items.map(s => ({ 
+      id: s.id, // Use the slot's unique ID
+      examId: s.examId,
+      name: s.name, // This now contains 'Maths Olympiad' etc.
       subject: s.subject, 
-      minutes: s.slotMinutes,
+      minutes: s.minutes,
       type: "revision",
       section: "Revision"
     })),
     ...day.projects.items.map(i => ({ ...i, type: "project", section: "Projects" }))
   ];
 
-  // 2. Filter Logic: 🎯 TRUST THE LOG
-  // We determine if an item is finished strictly by checking if its unique 
-  // key (type:id) exists in the completions set provided by the hook.
-  
+  // 2. Filter Logic remains the same - it now trusts the specific slot ID
   const activeItems = allPossibleItems.filter(item => {
     const key = `${item.type}:${item.id}`;
     return !completions.completed.has(key);
@@ -41,7 +40,7 @@ export default function DailyChecklist({ day, completions }: Props) {
     return completions.completed.has(key);
   });
 
-  // Helper to render a task row
+// ... rest of the component (TaskRow, Render logic)
 // Helper to render a task row
   const TaskRow = ({ item, isDone }: { item: any, isDone: boolean }) => (
     <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${

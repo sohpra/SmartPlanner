@@ -19,7 +19,8 @@ import { useProjects } from "@/hooks/use-projects";
 import { usePlannerDeadlineTasks } from "@/hooks/use-planner-tasks";
 import { useWeeklyTasks } from "@/hooks/use-weekly-tasks";
 import { useDailyCompletions } from "@/hooks/use-daily-completions";
-import { usePlannerCapacity } from "@/hooks/use-planner-capacity"; // 🎯 Added
+import { usePlannerCapacity } from "@/hooks/use-planner-capacity"; 
+import { useRevision } from "@/hooks/use-revision";
 
 // Logic
 import { buildWeekPlan } from "@/lib/planner/buildWeekPlan";
@@ -49,13 +50,13 @@ export default function PlannerPage() {
 
   const { tasks: weeklyTasks = [], isLoading: weeklyLoading } = useWeeklyTasks();
   const completions = useDailyCompletions(new Date(), updateTaskStatusLocally);
-  
+  const { slots: revisionSlots, isLoading: revisionLoading } = useRevision();
   // 🎯 1. Fetch Capacity Data
   const { capacityData, loading: capacityLoading } = usePlannerCapacity();
 
-  const activePlan = useMemo(() => {
-    // 🎯 2. Include capacityLoading in the gatekeeper
-    const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading && !capacityLoading;
+ const activePlan = useMemo(() => {
+    // 🎯 1. Include revisionLoading here
+    const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading && !capacityLoading && !revisionLoading;
     if (!isDataLoaded || !capacityData) return null;
 
     return buildWeekPlan({
@@ -66,7 +67,8 @@ export default function PlannerPage() {
       exams: exams.upcoming || [],
       projects,
       completions: completions.allCompletions || [],
-      capacityData, // 🎯 3. Pass data to engine
+      capacityData,
+      revisionSlots, 
     });
   }, [
     today, 
@@ -79,8 +81,10 @@ export default function PlannerPage() {
     deadlinesLoading, 
     weeklyLoading, 
     completions.allCompletions,
-    capacityData,    // 🎯 4. Re-run when capacity changes
-    capacityLoading
+    capacityData,
+    capacityLoading,
+    revisionSlots,   
+    revisionLoading
   ]);
   
   if (!activePlan) {

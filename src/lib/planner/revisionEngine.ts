@@ -133,6 +133,7 @@ export function planRevisionSlots(
     .map(buildRevisionDemand)
     .filter((d): d is RevisionDemand => d !== null && daysBetween(opts.startDate, d.examDate) >= 0);
 
+  // 🎯 Use ONE consistent array for the whole process
   const days: DailyRevisionPlan[] = windowDates.map(date => ({
     date,
     capacityMinutes: opts.capacityByDate[date] ?? 0,
@@ -167,17 +168,20 @@ export function planRevisionSlots(
     placed = false;
     for (const day of days) {
       if (day.remainingMinutes <= 0) continue;
-      const eligible = demands
-        .filter(d => d.remainingSlots > 0 && daysBetween(day.date, d.examDate) > 0 && day.remainingMinutes >= d.slotMinutes)
-        .sort((a, b) => {
-          const da = daysBetween(day.date, a.examDate);
-          const db = daysBetween(day.date, b.examDate);
-          if (da !== db) return da - db;
-          return typePriority(b.examType) - typePriority(a.examType);
-        });
 
-      if (eligible.length > 0) {
-        const d = eligible[0];
+      const eligibleDemands = demands.filter(d => 
+        d.remainingSlots > 0 && 
+        daysBetween(day.date, d.examDate) > 0 && // 🎯 STRICTLY before exam
+        day.remainingMinutes >= d.slotMinutes
+      ).sort((a, b) => {
+        const da = daysBetween(day.date, a.examDate);
+        const db = daysBetween(day.date, b.examDate);
+        if (da !== db) return da - db;
+        return typePriority(b.examType) - typePriority(a.examType);
+      });
+
+      if (eligibleDemands.length > 0) {
+        const d = eligibleDemands[0];
         day.slots.push({
           date: day.date,
           examId: d.examId,
@@ -194,13 +198,16 @@ export function planRevisionSlots(
     }
   }
 
-  /* PHASE B: OVERLOAD (Honest assessment) */
+  /* PHASE B: OVERLOAD (Cramming) */
   demands.filter(d => d.remainingSlots > 0).forEach(d => {
     while (d.remainingSlots > 0) {
-      const dayBefore = addDays(d.examDate, -1);
-      const targetDay = days.find(day => day.date === dayBefore) || days[days.length - 1];
-      if (daysBetween(targetDay.date, d.examDate) < 0) break;
-      
+      // 🎯 Find the last possible day that is BEFORE the exam
+      const targetDay = [...days]
+        .reverse()
+        .find(day => daysBetween(day.date, d.examDate) > 0);
+
+      if (!targetDay) break; 
+
       targetDay.slots.push({
         date: targetDay.date,
         examId: d.examId,
@@ -211,7 +218,7 @@ export function planRevisionSlots(
       });
       d.remainingSlots--;
       targetDay.usedMinutes += d.slotMinutes;
-      targetDay.remainingMinutes -= d.slotMinutes; // Will go negative
+      targetDay.remainingMinutes -= d.slotMinutes; 
     }
   });
 
