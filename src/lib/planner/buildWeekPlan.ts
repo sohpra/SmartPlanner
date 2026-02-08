@@ -147,35 +147,41 @@ doneSlots.forEach(s => {
   }
 });
 
+// 🎯 FIX 1: Change displayName -> label AND duration_minutes -> slotMinutes
 const bigBlocks = pendingSlots.filter(s => 
-  (s.duration_minutes || 0) >= 120 || 
-  (s.displayName || "").includes("FINAL")
+  (s.slotMinutes || s.duration_minutes || 0) >= 90 || 
+  (s.label || s.displayName || "").includes("FINAL")
 );
 
 const drillSlots = pendingSlots.filter(s => 
-  (s.duration_minutes || 0) < 120 && 
-  !(s.displayName || "").includes("FINAL")
+  (s.slotMinutes || s.duration_minutes || 0) < 90 && 
+  !(s.label || s.displayName || "").includes("FINAL")
 );
 
 // --- STEP 2: Place Big Blocks (Exam Eve Anchor) ---
 bigBlocks.forEach(slot => {
   const rawExamDate = slot.exam?.date || slot.date;
   const examDate = rawExamDate ? String(rawExamDate).split('T')[0] : null;
-  const eligibleDates = windowDates.filter(d => !examDate || d < examDate);
-  if (eligibleDates.length === 0) return;
-
-  const examEve = eligibleDates[eligibleDates.length - 1];
-  const mins = slot.duration_minutes || 120;
   
-  revisionItems[examEve].push({
-    id: slot.id,
-    name: slot.displayName || "Final Prep",
-    subject: slot.subject || slot.exam?.subject || "Revision",
-    minutes: mins,
-    isDone: false,
-    type: 'revision'
-  });
-  occupiedCap[examEve] += mins;
+  // 🎯 FIX 2: Use the exact match logic so it doesn't "pile up" on the 9th
+  const examEve = examDate ? addDays(examDate, -1) : null;
+  
+  // Check if this date exists in our 60-day window
+  if (examEve && revisionItems[examEve]) {
+    // 🎯 FIX 3: Standardize the minutes key
+    const mins = slot.slotMinutes || slot.duration_minutes || 120;
+    
+    revisionItems[examEve].push({
+      id: slot.id,
+      // 🎯 FIX 4: Ensure name is mapped correctly for the WeeklyView
+      name: slot.label || slot.displayName || "Final Prep",
+      subject: slot.subject || slot.exam?.subject || "Revision",
+      minutes: mins,
+      isDone: false,
+      type: 'revision'
+    });
+    occupiedCap[examEve] += mins;
+  }
 });
 
 // --- STEP 3: Place Drill Slots (Aggressive Fill with Capacity Guard) ---
@@ -183,19 +189,21 @@ drillSlots.forEach(slot => {
   const rawExamDate = slot.exam?.date || slot.date;
   const examDate = rawExamDate ? String(rawExamDate).split('T')[0] : null;
   const eligibleDates = windowDates.filter(d => !examDate || d < examDate);
-  const mins = slot.duration_minutes || 60;
+  
+  // 🎯 FIX 1: Map Engine 'slotMinutes' to 'minutes'
+  const mins = slot.slotMinutes || slot.duration_minutes || 60;
 
   let placed = false;
   for (const d of eligibleDates) {
     const isToday = d === today;
     const maxDrills = 3;
-    const currentRevCount = revisionItems[d].length;
+    const currentRevCount = (revisionItems[d] || []).length;
 
-    // Check capacity and respect the 3-drill limit for Today
     if (occupiedCap[d] + mins <= baseCapMap[d] && (!isToday || currentRevCount < maxDrills)) {
       revisionItems[d].push({
         id: slot.id,
-        name: slot.displayName || "Revision",
+        // 🎯 FIX 2: Map Engine 'label' to 'name'
+        name: slot.label || slot.displayName || "Revision",
         subject: slot.subject || slot.exam?.subject || "Revision",
         minutes: mins,
         isDone: false,
@@ -207,12 +215,12 @@ drillSlots.forEach(slot => {
     }
   }
 
-  // --- STEP 4: Overload Fallback (Force to Wednesday/Exam Eve) ---
+  // --- STEP 4: Overload Fallback ---
   if (!placed && eligibleDates.length > 0) {
     const examEve = eligibleDates[eligibleDates.length - 1];
     revisionItems[examEve].push({
       id: slot.id,
-      name: slot.displayName || slot.description || "Revision",
+      name: slot.label || slot.displayName || "Revision",
       subject: slot.subject || slot.exam?.subject || "General",
       minutes: mins,
       isDone: false,

@@ -12,19 +12,26 @@ interface MonthViewProps {
 export function MonthView({ plan, exams, projects }: MonthViewProps) {
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
-  const calendarDays = useMemo(() => {
-    // ... (Keep your Monday Anchor logic exactly as is)
+const calendarDays = useMemo(() => {
     const firstDayInPlan = new Date(plan.days[0].date + "T00:00:00");
     const dayOfWeek = firstDayInPlan.getDay();
     const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
     const startMonday = new Date(firstDayInPlan);
     startMonday.setDate(firstDayInPlan.getDate() + diffToMonday);
 
+    // 🎯 FIX 1: Increase loop to 56 (8 weeks) to ensure we see the full 60-day horizon
     const fullGrid: DayPlan[] = [];
-    for (let i = 0; i < 28; i++) {
+    // 🎯 56 days (8 full weeks) to match your 60-day horizon
+    for (let i = 0; i < 56; i++) {
       const current = new Date(startMonday);
       current.setDate(startMonday.getDate() + i);
-      const dateStr = current.toISOString().slice(0, 10);
+      
+      const dateStr = [
+        current.getFullYear(),
+        String(current.getMonth() + 1).padStart(2, '0'),
+        String(current.getDate()).padStart(2, '0')
+      ].join('-');
+      
       const planDay = plan.days.find(d => d.date === dateStr);
       
       if (planDay) {
@@ -32,12 +39,12 @@ export function MonthView({ plan, exams, projects }: MonthViewProps) {
       } else {
         fullGrid.push({
           date: dateStr,
-          totalUsed: 0,
+          totalPlanned: 0,
           baseCapacity: 180,
           spare: 180,
           weekly: { items: [] },
           homework: { items: [] },
-          revision: { slots: [] },
+          revision: { items: [] }, // items, not slots
           projects: { items: [] }
         } as unknown as DayPlan);
       }
@@ -87,11 +94,23 @@ export function MonthView({ plan, exams, projects }: MonthViewProps) {
 
               {/* Strategic Milestones */}
               <div className="flex-1 space-y-1 mb-2 overflow-hidden">
-                {dayExams.map((exam, i) => (
-                  <div key={i} className="px-1.5 py-0.5 rounded bg-amber-100 border border-amber-300 text-[8px] font-black text-amber-800 uppercase truncate shadow-sm">
-                    🎓 {exam.subject} Exam
+                {dayExams.map((exam, i) => {
+                // 🎯 Logic: Prioritize Specific Name > Board > Subject
+                const displayTitle = 
+                  exam.competitive_exam_name || 
+                  (exam.exam_type === 'Board' && exam.exam_board 
+                    ? `${exam.subject} (${exam.exam_board})` 
+                    : exam.subject);
+
+                // Use the color from the DB, or default to amber for exams
+                const bgColor = exam.exam_type === 'Competitive' ? 'bg-purple-100 border-purple-300 text-purple-800' : 'bg-amber-100 border-amber-300 text-amber-800';
+
+                return (
+                  <div key={i} className={`px-1.5 py-0.5 rounded border text-[8px] font-black uppercase truncate shadow-sm ${bgColor}`}>
+                    🎓 {displayTitle}
                   </div>
-                ))}
+                );
+              })}
 
                 {dayProjects.map((proj, i) => (
                   <div key={i} className="px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[8px] font-black text-blue-700 uppercase truncate">
@@ -99,7 +118,14 @@ export function MonthView({ plan, exams, projects }: MonthViewProps) {
                   </div>
                 ))}
               </div>
-
+              {/* Revision Work Blocks */}
+              <div className="space-y-0.5">
+                {day.revision.items.map((item, i) => (
+                  <div key={i} className="px-1 py-0.5 rounded-sm bg-amber-50 border-l-2 border-amber-400 text-[7px] font-bold text-amber-700 truncate leading-none">
+                    {item.name || item.label}
+                  </div>
+                ))}
+              </div>
               {/* Daily Capacity Progress (Bottom) */}
               <div className="mt-auto pt-1 border-t border-gray-50">
                 {day.totalPlanned > 0 && (

@@ -142,61 +142,87 @@ export function planRevisionSlots(
     slots: [],
   }));
 
-  /* PHASE 0: GOLDEN SLOTS (Pre-Exam Lock) */
-  demands.forEach(d => {
-    const dayBefore = addDays(d.examDate, -1);
-    const targetDay = days.find(day => day.date === dayBefore);
-    if (targetDay) {
-      const lockMinutes = d.examType === "Internal" ? 60 : 120;
-      targetDay.slots.push({
-        date: targetDay.date,
-        examId: d.examId,
-        subject: d.subject,
-        examType: d.examType,
-        slotMinutes: lockMinutes,
-        label: `FINAL: ${getDynamicLabel(d, "")}`,
-      });
-      targetDay.usedMinutes += lockMinutes;
-      targetDay.remainingMinutes -= lockMinutes;
-      d.remainingSlots = Math.max(0, d.remainingSlots - Math.ceil(lockMinutes / d.slotMinutes));
-    }
-  });
 
-  /* PHASE A: NORMAL CAPACITY FILL */
-  let placed = true;
-  while (placed) {
-    placed = false;
-    for (const day of days) {
-      if (day.remainingMinutes <= 0) continue;
+/* --- PHASE 0: GOLDEN SLOTS (Exam Eve) --- */
+demands.forEach(d => {
+  const dayBefore = addDays(d.examDate, -1);
+  const targetDay = days.find(day => day.date === dayBefore);
+  if (targetDay) {
+    const lockMinutes = d.examType === "Internal" ? 60 : 120;
+    
+    // 🎯 Use unshift to ensure it's at the top of the list
+    targetDay.slots.unshift({
+      date: targetDay.date,
+      examId: d.examId,
+      subject: d.subject,
+      examType: d.examType,
+      slotMinutes: lockMinutes,
+      label: `FINAL: ${getDynamicLabel(d, "")}`,
+    });
+    
+    targetDay.usedMinutes += lockMinutes;
+    targetDay.remainingMinutes -= lockMinutes;
+    
+    // 🎯 Correctly reduce remaining slots by the amount of "standard" slots covered
+    const slotsCovered = Math.floor(lockMinutes / d.slotMinutes);
+    d.remainingSlots = Math.max(0, d.remainingSlots - slotsCovered);
+  }
+});
 
-      const eligibleDemands = demands.filter(d => 
-        d.remainingSlots > 0 && 
-        daysBetween(day.date, d.examDate) > 0 && // 🎯 STRICTLY before exam
-        day.remainingMinutes >= d.slotMinutes
-      ).sort((a, b) => {
-        const da = daysBetween(day.date, a.examDate);
-        const db = daysBetween(day.date, b.examDate);
-        if (da !== db) return da - db;
-        return typePriority(b.examType) - typePriority(a.examType);
-      });
+/* --- PHASE A: GLOBAL INTERLEAVING FILL --- */
+let placed = true;
+while (placed) {
+  placed = false;
+  let bestSlot: { day: DailyRevisionPlan; demand: RevisionDemand; score: number } | null = null;
 
-      if (eligibleDemands.length > 0) {
-        const d = eligibleDemands[0];
-        day.slots.push({
-          date: day.date,
-          examId: d.examId,
-          subject: d.subject,
-          examType: d.examType,
-          slotMinutes: d.slotMinutes,
-          label: getDynamicLabel(d, "Revision"),
-        });
-        d.remainingSlots--;
-        day.usedMinutes += d.slotMinutes;
-        day.remainingMinutes -= d.slotMinutes;
-        placed = true;
+  for (const day of days) {
+    if (day.remainingMinutes <= 0) continue;
+
+    const daySubjects = day.slots.map(s => s.subject);
+    const eligibleDemands = demands.filter(d => 
+      d.remainingSlots > 0 && 
+      daysBetween(day.date, d.examDate) > 0 && 
+      day.remainingMinutes >= d.slotMinutes &&
+      daySubjects.filter(s => s === d.subject).length < 2 // 🎯 Strict 2-per-day cap
+    );
+
+    for (const d of eligibleDemands) {
+      const daysLeft = daysBetween(day.date, d.examDate);
+      
+      // 🎯 1. URGENCY: Bebras (March 2) should dwarf Maths (March 19)
+      const urgency = 200 / (daysLeft + 1); 
+
+      // 🎯 2. VOLUME: Proportional to total slots so it doesn't "over-weight"
+      const totalPossible = Math.ceil(d.totalMinutes / d.slotMinutes);
+      const volume = (d.remainingSlots / totalPossible) * 30;
+
+      // 🎯 3. VARIETY PENALTY: If this subject is already on this day, tank its score
+      const varietyPenalty = daySubjects.includes(d.subject) ? 50 : 0;
+
+      const score = urgency + volume + typePriority(d.examType) * 10 - varietyPenalty;
+
+      if (!bestSlot || score > bestSlot.score) {
+        bestSlot = { day, demand: d, score };
       }
     }
   }
+
+  if (bestSlot) {
+    const { day, demand } = bestSlot;
+    day.slots.push({
+      date: day.date,
+      examId: demand.examId,
+      subject: demand.subject,
+      examType: demand.examType,
+      slotMinutes: demand.slotMinutes,
+      label: getDynamicLabel(demand, "Revision"),
+    });
+    demand.remainingSlots--;
+    day.usedMinutes += demand.slotMinutes;
+    day.remainingMinutes -= demand.slotMinutes;
+    placed = true;
+  }
+}
 
   /* PHASE B: OVERLOAD (Cramming) */
   demands.filter(d => d.remainingSlots > 0).forEach(d => {

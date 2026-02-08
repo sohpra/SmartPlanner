@@ -9,19 +9,22 @@ import { useDailyCompletions } from "@/hooks/use-daily-completions";
 import { useRevision } from "./use-revision";
 import { buildWeekPlan } from "@/lib/planner/buildWeekPlan";
 
-export function useWeekPlan(numDays = 7) {
-  // 🎯 LOG 1: Is the hook function itself defined?
+export function useWeekPlan(numDays = 60) { // 🎯 Default to 60 for long-range planning
   const weekly = useWeeklyTasks();
   const deadlines = useDeadlineTasks();
   const exams = useExams();
   const projects = useProjects();
   const revision = useRevision(); 
-  const { allCompletions } = useDailyCompletions(new Date());
 
+  // 🎯 Generate real "Today" string (YYYY-MM-DD)
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+
+  // Ensure completions hook uses the same dynamic date
+  const { allCompletions } = useDailyCompletions(new Date(todayStr));
 
   const weekPlan = useMemo(() => {
     return buildWeekPlan({
-      today: "2026-02-08", // Force today for testing
+      today: todayStr, // 🎯 Dynamic today
       numDays,
       weeklyTasks: weekly.tasks || [],
       deadlines: deadlines.tasks || [],
@@ -30,12 +33,16 @@ export function useWeekPlan(numDays = 7) {
       revisionSlots: revision.slots || [], 
       completions: allCompletions,
     });
-  }, [numDays, weekly.tasks, deadlines.tasks, exams.upcoming, projects.projects, revision.slots, allCompletions]);
+  }, [todayStr, numDays, weekly.tasks, deadlines.tasks, exams.upcoming, projects.projects, revision.slots, allCompletions]);
 
   return {
     weekPlan,
-    snapshotStart: "2026-02-08",
-    refresh: () => console.log("Refresh"),
-    isLoading: revision.isLoading // Simplified for now
+    snapshotStart: todayStr,
+    // Add triggers for your specific hook refresh methods if they exist
+    refresh: () => {
+      if (exams.refresh) exams.refresh();
+      console.log("Syncing all data to current date:", todayStr);
+    },
+    isLoading: revision.isLoading || exams.loading
   };
 }

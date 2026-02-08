@@ -61,7 +61,7 @@ export default function PlannerPage() {
 
     return buildWeekPlan({
       today,
-      numDays: 30,
+      numDays: 60,
       weeklyTasks,
       deadlines,
       exams: exams.upcoming || [],

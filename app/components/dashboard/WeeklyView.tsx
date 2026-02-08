@@ -27,7 +27,13 @@ export function WeeklyView({ plan, exams, projects }: Props) {
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(anchorMonday);
       dayDate.setDate(anchorMonday.getDate() + i);
-      const dateStr = dayDate.toISOString().slice(0, 10);
+      
+      // 🎯 Use local date parts instead of toISOString()
+      const dateStr = [
+        dayDate.getFullYear(),
+        String(dayDate.getMonth() + 1).padStart(2, '0'),
+        String(dayDate.getDate()).padStart(2, '0')
+      ].join('-');
       
       const planDay = plan.days.find(d => d.date === dateStr);
       
@@ -135,11 +141,26 @@ function DayColumn({ day, isPast, isToday, exams, projects }: {
 
       {(dayExams.length > 0 || dayProjects.length > 0) && (
         <div className="flex flex-col gap-1 px-1">
-          {dayExams.map((exam, i) => (
-            <div key={i} className="px-2 py-1 rounded bg-amber-500 text-white text-[8px] font-black uppercase shadow-sm flex items-center gap-1">
-              <span>🎓</span> <span className="truncate">{exam.subject} EXAM</span>
-            </div>
-          ))}
+          {dayExams.map((exam, i) => {
+            // 🎯 Logic: Prioritize Specific Name > Board > Subject
+            const displayTitle = 
+              exam.competitive_exam_name || 
+              (exam.exam_type === 'Board' && exam.exam_board 
+                ? `${exam.subject} (${exam.exam_board})` 
+                : exam.subject);
+
+            return (
+              <div 
+                key={i} 
+                className={`px-2 py-1 rounded text-[8px] font-black uppercase shadow-sm flex items-center gap-1 text-white
+                  ${exam.exam_type === 'Competitive' ? 'bg-purple-600' : 'bg-amber-500'}`}
+              >
+                <span>🎓</span> 
+                <span className="truncate">{displayTitle} {exam.exam_type === 'Internal' ? 'EXAM' : ''}</span>
+              </div>
+            );
+          })}
+          
           {dayProjects.map((proj, i) => (
             <div key={i} className="px-2 py-1 rounded bg-blue-600 text-white text-[8px] font-black uppercase shadow-sm flex items-center gap-1">
               <span>🏁</span> <span className="truncate">{proj.name}</span>
