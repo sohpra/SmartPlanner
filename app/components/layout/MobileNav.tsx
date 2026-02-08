@@ -1,18 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { LayoutDashboard, ClipboardList, GraduationCap, LogOut } from "lucide-react";
-
+import { supabase } from "@/lib/supabase/client"; // Ensure this path is correct
 
 export function MobileNav() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    // Redirect to landing or login
+    router.push("/");
+    router.refresh();
+  };
 
   const navItems = [
     { label: "Plan", href: "/planner", icon: LayoutDashboard },
     { label: "Tasks", href: "/tasks", icon: ClipboardList },
     { label: "Exams", href: "/exams", icon: GraduationCap },
-    { label: "Logout", href: "/settings", icon: LogOut },
   ];
 
   return (
@@ -35,6 +42,17 @@ export function MobileNav() {
             </Link>
           );
         })}
+
+        {/* 🎯 Logout Button (Separate from the Link loop) */}
+        <button 
+          onClick={handleLogout}
+          className="flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-red-500 transition-all"
+        >
+          <LogOut size={20} strokeWidth={2} />
+          <span className="text-[10px] font-black uppercase tracking-widest">
+            Logout
+          </span>
+        </button>
       </div>
     </nav>
   );
