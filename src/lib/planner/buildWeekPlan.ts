@@ -82,35 +82,46 @@ export function buildWeekPlan({
   );
 
   for (const task of sortedHw) {
-    const isDoneToday = todayCompletionKeys.has(`deadline_task:${task.id}`);
-    const isDoneHistory = historicalIds.has(task.id) || (task.status === 'completed' && !isDoneToday);
-    if (isDoneHistory) continue;
+  const isDoneToday = todayCompletionKeys.has(`deadline_task:${task.id}`);
+  const isDoneHistory = historicalIds.has(task.id) || (task.status === 'completed' && !isDoneToday);
+  if (isDoneHistory) continue;
 
-    const mapped = { 
-      id: task.id, 
-      name: task.name, 
-      minutes: task.estimated_minutes, 
-      dueDate: task.due_date,
-      isDone: isDoneToday,
-      type: 'deadline_task',
-      isBonus: isDoneToday && task.due_date > today 
-    };
+  // 1. First, check: Would this task fit today NATURALLY?
+  // We simulate the placement logic without the "isDone" override.
+  const wouldFitTodayNormally = (occupiedCap[today] + task.estimated_minutes <= baseCapMap[today]) && (today <= task.due_date);
 
-    // Hold the seat for today's completed homework to prevent Hydra
-    if (isDoneToday) {
-      homeworkItems[today].push(mapped);
-      occupiedCap[today] += task.estimated_minutes;
-      continue;
+  const mapped = { 
+    id: task.id, 
+    name: task.name, 
+    minutes: task.estimated_minutes, 
+    dueDate: task.due_date,
+    isDone: isDoneToday,
+    type: 'deadline_task',
+    // 🎯 THE TRUE BONUS LOGIC:
+    // It is a bonus if it is done today, BUT it wouldn't have fit 
+    // or wasn't scheduled for today in a "clean" run.
+    isBonus: isDoneToday && !wouldFitTodayNormally 
+  };
+
+  if (isDoneToday) {
+    homeworkItems[today].push(mapped);
+    // If it's a bonus, we DON'T add to occupiedCap here because 
+    // we want to keep today's "Planned" space stable for the intended tasks.
+    if (!mapped.isBonus) {
+        occupiedCap[today] += task.estimated_minutes;
     }
+    continue;
+  }
 
-    for (const d of windowDates.filter(date => date <= task.due_date)) {
-      if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
-        homeworkItems[d].push(mapped);
-        occupiedCap[d] += task.estimated_minutes;
-        break;
-      }
+  // Standard placement for pending tasks
+  for (const d of windowDates.filter(date => date <= task.due_date)) {
+    if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
+      homeworkItems[d].push(mapped);
+      occupiedCap[d] += task.estimated_minutes;
+      break;
     }
   }
+}
 
 // 5. REVISION (The Iron-Clad Unified Architect)
 const revisionItems: Record<string, any[]> = {};
@@ -213,13 +224,28 @@ drillSlots.forEach(slot => {
 
 // 6. FINAL ASSEMBLY (Stable Progress Logic)
 const days: DayPlan[] = windowDates.map((d: string) => {
+  const isToday = d === today;
   const wk = weeklyItems[d] || [];
   const hw = homeworkItems[d] || [];
   const rv = revisionItems[d] || [];
   const allItems = [...wk, ...hw, ...rv];
   
-  const dayTotalPlannedMinutes = allItems.reduce((sum, i) => sum + (i.minutes || 0), 0);
-  const dayTotalDoneMinutes = allItems.filter(i => i.isDone).reduce((sum, i) => sum + (i.minutes || 0), 0);
+  // 🎯 1. STABLE TARGET (The Denominator)
+  // We only count items that were ACTUALLY scheduled for this day.
+  // We exclude any item marked 'isBonus'.
+  const dayTotalPlannedMinutes = allItems
+    .filter(i => !i.isBonus) 
+    .reduce((sum, i) => sum + (i.minutes || 0), 0);
+
+  // 🎯 2. ACTUAL PROGRESS (The Numerator)
+  // We count EVERYTHING that is checked off.
+  const dayTotalDoneMinutes = allItems
+    .filter(i => i.isDone)
+    .reduce((sum, i) => sum + (i.minutes || 0), 0);
+
+  // 🎯 3. TASK COUNTS (e.g. 6 / 5)
+  const totalCount = allItems.filter(i => !i.isBonus).length;
+  const completedCount = allItems.filter(i => i.isDone).length;
 
   return {
     date: d,
@@ -232,10 +258,12 @@ const days: DayPlan[] = windowDates.map((d: string) => {
     },
     revision: { minutes: rv.reduce((s, i) => s + (i.minutes || 0), 0), items: rv },
     projects: { minutes: 0, items: [] },
+    
+    // Updated Values
     totalPlanned: dayTotalPlannedMinutes, 
     totalCompleted: dayTotalDoneMinutes,
-    plannedTaskCount: allItems.length,   
-    completedTaskCount: allItems.filter(i => i.isDone).length,
+    plannedTaskCount: totalCount,   
+    completedTaskCount: completedCount,
     spare: Math.max(0, baseCapMap[d] - dayTotalPlannedMinutes)
   };
 });
