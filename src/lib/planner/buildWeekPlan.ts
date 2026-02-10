@@ -69,7 +69,7 @@ export function buildWeekPlan({
       }));
   });
 
-  // 4. HOMEWORK
+// 4. HOMEWORK (Earliest Best Fit + Stability shiled + N-1 Deadline Guard)
   const homeworkItems: Record<string, any[]> = {};
   const occupiedCap: Record<string, number> = {};
   windowDates.forEach(d => {
@@ -82,151 +82,133 @@ export function buildWeekPlan({
   );
 
   for (const task of sortedHw) {
-  const isDoneToday = todayCompletionKeys.has(`deadline_task:${task.id}`);
-  const isDoneHistory = historicalIds.has(task.id) || (task.status === 'completed' && !isDoneToday);
-  if (isDoneHistory) continue;
+    const isDoneToday = todayCompletionKeys.has(`deadline_task:${task.id}`);
+    const isDoneHistory = historicalIds.has(task.id) || (task.status === 'completed' && !isDoneToday);
+    if (isDoneHistory) continue;
 
-  // 1. First, check: Would this task fit today NATURALLY?
-  // We simulate the placement logic without the "isDone" override.
-  const wouldFitTodayNormally = (occupiedCap[today] + task.estimated_minutes <= baseCapMap[today]) && (today <= task.due_date);
+    const mapped = { 
+      id: task.id, 
+      name: task.name, 
+      minutes: task.estimated_minutes, 
+      dueDate: task.due_date,
+      isDone: isDoneToday,
+      type: 'deadline_task',
+      isBonus: false 
+    };
 
-  const mapped = { 
-    id: task.id, 
-    name: task.name, 
-    minutes: task.estimated_minutes, 
-    dueDate: task.due_date,
-    isDone: isDoneToday,
-    type: 'deadline_task',
-    // 🎯 THE TRUE BONUS LOGIC:
-    // It is a bonus if it is done today, BUT it wouldn't have fit 
-    // or wasn't scheduled for today in a "clean" run.
-    isBonus: isDoneToday && !wouldFitTodayNormally 
-  };
-
-  if (isDoneToday) {
-    homeworkItems[today].push(mapped);
-    // If it's a bonus, we DON'T add to occupiedCap here because 
-    // we want to keep today's "Planned" space stable for the intended tasks.
-    if (!mapped.isBonus) {
-        occupiedCap[today] += task.estimated_minutes;
+    if (isDoneToday) {
+      homeworkItems[today].push(mapped);
+      occupiedCap[today] += task.estimated_minutes;
+      continue;
     }
-    continue;
+
+    // 🎯 THE "N-1" WINDOW
+    const dayBeforeDeadline = addDays(task.due_date, -1);
+    const possibleDays = windowDates.filter(date => date >= today && date <= dayBeforeDeadline);
+    let placedDate: string | null = null;
+
+    // PASS 1: Best Fit (The "Polite" Search)
+    for (const d of possibleDays) {
+      const buffer = 45;
+      if (occupiedCap[d] + task.estimated_minutes + buffer <= baseCapMap[d]) {
+        placedDate = d;
+        break;
+      }
+    }
+
+    // PASS 2: Emergency Fit (The "Strict" Search)
+    if (!placedDate) {
+      for (const d of possibleDays) {
+        if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
+          placedDate = d;
+          break;
+        }
+      }
+    }
+
+    // PASS 3: Guarantee (The "Last Minute" Force)
+    if (!placedDate) {
+      // If due tomorrow, it stays today. If due later, it forces onto day-before.
+      placedDate = possibleDays.length > 0 ? dayBeforeDeadline : today;
+    }
+
+    if (placedDate && homeworkItems[placedDate]) {
+      // Bonus logic based on the "Pass 1" ideal
+      const wouldFitTodayNormally = (occupiedCap[today] + task.estimated_minutes + 45 <= baseCapMap[today]);
+      mapped.isBonus = (placedDate === today && !wouldFitTodayNormally);
+      
+      homeworkItems[placedDate].push(mapped);
+      occupiedCap[placedDate] += task.estimated_minutes;
+    }
   }
 
-  // Standard placement for pending tasks
-  for (const d of windowDates.filter(date => date <= task.due_date)) {
-    if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
-      homeworkItems[d].push(mapped);
-      occupiedCap[d] += task.estimated_minutes;
-      break;
-    }
-  }
-}
-
-// 5. REVISION (The Iron-Clad Unified Architect)
+// --- 5. REVISION (The Iron-Clad Unified Architect) ---
 const revisionItems: Record<string, any[]> = {};
 windowDates.forEach(d => revisionItems[d] = []);
 
 const allSlots = (revisionSlots || []) as any[];
 
-const doneSlots = allSlots.filter(s => todayCompletionKeys.has(`revision:${s.id}`));
-const pendingSlots = allSlots.filter(s => !todayCompletionKeys.has(`revision:${s.id}`));
+// Separating the "Done" from "Pending" using your completion keys
+const doneSlots = allSlots.filter(s => todayCompletionKeys.has(`revision:${s.id}`) || s.is_completed);
+const pendingSlots = allSlots.filter(s => !todayCompletionKeys.has(`revision:${s.id}`) && !s.is_completed);
 
-// --- STEP 1: Process Done Items ONCE (The Hydra Guard) ---
+// --- STEP 1: Process Done Items (The Hydra Guard) ---
 doneSlots.forEach(s => {
+  // Completed items are visually pinned to "Today" regardless of original assigned date
   if (revisionItems[today]) {
-    const mins = s.duration_minutes || 60;
+    const mins = s.duration_minutes || s.slotMinutes || 30;
     revisionItems[today].push({ 
       ...s, 
-      name: s.displayName || s.description || "Revision",
+      id: s.id,
+      name: s.label || s.description || s.displayName || "Revision",
+      subject: s.subject || "Revision",
       type: 'revision', 
       isDone: true, 
       minutes: mins 
     });
-    occupiedCap[today] += mins; // This holds the seat and stops the Hydra
+    // Record capacity so the progress bar reflects work done
+    occupiedCap[today] += mins;
   }
 });
 
-// 🎯 FIX 1: Change displayName -> label AND duration_minutes -> slotMinutes
-const bigBlocks = pendingSlots.filter(s => 
-  (s.slotMinutes || s.duration_minutes || 0) >= 90 || 
-  (s.label || s.displayName || "").includes("FINAL")
-);
+// --- STEP 2: Place Pending Slots (Trust the Database) ---
+// We no longer "calculate" eligibility. If the Engine put it on a date, we show it there.
+pendingSlots.forEach(slot => {
+  // Normalize the date from ISO or DB string to YYYY-MM-DD
+  const assignedDate = slot.date ? String(slot.date).split('T')[0] : null;
 
-const drillSlots = pendingSlots.filter(s => 
-  (s.slotMinutes || s.duration_minutes || 0) < 90 && 
-  !(s.label || s.displayName || "").includes("FINAL")
-);
-
-// --- STEP 2: Place Big Blocks (Exam Eve Anchor) ---
-bigBlocks.forEach(slot => {
-  const rawExamDate = slot.exam?.date || slot.date;
-  const examDate = rawExamDate ? String(rawExamDate).split('T')[0] : null;
-  
-  // 🎯 FIX 2: Use the exact match logic so it doesn't "pile up" on the 9th
-  const examEve = examDate ? addDays(examDate, -1) : null;
-  
-  // Check if this date exists in our 60-day window
-  if (examEve && revisionItems[examEve]) {
-    // 🎯 FIX 3: Standardize the minutes key
-    const mins = slot.slotMinutes || slot.duration_minutes || 120;
+  // Only render if the date falls within our current 60-day window
+  if (assignedDate && revisionItems[assignedDate]) {
+    const mins = slot.slotMinutes || slot.duration_minutes || 30;
     
-    revisionItems[examEve].push({
+    revisionItems[assignedDate].push({
       id: slot.id,
-      // 🎯 FIX 4: Ensure name is mapped correctly for the WeeklyView
-      name: slot.label || slot.displayName || "Final Prep",
-      subject: slot.subject || slot.exam?.subject || "Revision",
+      // 'name' is what the WeeklyView/DayColumn looks for
+      name: slot.label || slot.displayName || slot.description || "Revision",
+      subject: slot.subject || (slot.exam ? slot.exam.subject : "Revision"),
       minutes: mins,
       isDone: false,
-      type: 'revision'
+      type: 'revision',
+      examId: slot.exam_id
     });
-    occupiedCap[examEve] += mins;
+    
+    // Increment the capacity tracker for that specific day
+    occupiedCap[assignedDate] += mins;
   }
 });
 
-// --- STEP 3: Place Drill Slots (Aggressive Fill with Capacity Guard) ---
-drillSlots.forEach(slot => {
-  const rawExamDate = slot.exam?.date || slot.date;
-  const examDate = rawExamDate ? String(rawExamDate).split('T')[0] : null;
-  const eligibleDates = windowDates.filter(d => !examDate || d < examDate);
-  
-  // 🎯 FIX 1: Map Engine 'slotMinutes' to 'minutes'
-  const mins = slot.slotMinutes || slot.duration_minutes || 60;
-
-  let placed = false;
-  for (const d of eligibleDates) {
-    const isToday = d === today;
-    const maxDrills = 3;
-    const currentRevCount = (revisionItems[d] || []).length;
-
-    if (occupiedCap[d] + mins <= baseCapMap[d] && (!isToday || currentRevCount < maxDrills)) {
-      revisionItems[d].push({
-        id: slot.id,
-        // 🎯 FIX 2: Map Engine 'label' to 'name'
-        name: slot.label || slot.displayName || "Revision",
-        subject: slot.subject || slot.exam?.subject || "Revision",
-        minutes: mins,
-        isDone: false,
-        type: 'revision'
-      });
-      occupiedCap[d] += mins;
-      placed = true;
-      break;
-    }
-  }
-
-  // --- STEP 4: Overload Fallback ---
-  if (!placed && eligibleDates.length > 0) {
-    const examEve = eligibleDates[eligibleDates.length - 1];
-    revisionItems[examEve].push({
-      id: slot.id,
-      name: slot.label || slot.displayName || "Revision",
-      subject: slot.subject || slot.exam?.subject || "General",
-      minutes: mins,
-      isDone: false,
-      type: 'revision'
+// --- STEP 3: Cleanup / Sorting ---
+// Optional: Sort each day so "FINAL" blocks or larger blocks appear at the top
+windowDates.forEach(d => {
+  if (revisionItems[d]) {
+    revisionItems[d].sort((a, b) => {
+      // Put "Done" at the bottom
+      if (a.isDone !== b.isDone) return a.isDone ? 1 : -1;
+      // Put "FINAL" blocks at the top
+      const aFinal = a.name.includes("FINAL") ? 1 : 0;
+      const bFinal = b.name.includes("FINAL") ? 1 : 0;
+      return bFinal - aFinal;
     });
-    occupiedCap[examEve] += mins;
   }
 });
 
@@ -241,19 +223,17 @@ const days: DayPlan[] = windowDates.map((d: string) => {
   // 🎯 1. STABLE TARGET (The Denominator)
   // We only count items that were ACTUALLY scheduled for this day.
   // We exclude any item marked 'isBonus'.
-  const dayTotalPlannedMinutes = allItems
-    .filter(i => !i.isBonus) 
-    .reduce((sum, i) => sum + (i.minutes || 0), 0);
+  const dayTotalPlannedMinutes = occupiedCap[d] || 0;
 
   // 🎯 2. ACTUAL PROGRESS (The Numerator)
   // We count EVERYTHING that is checked off.
-  const dayTotalDoneMinutes = allItems
+  const dayTotalDoneMinutes = [...wk, ...hw, ...rv]
     .filter(i => i.isDone)
     .reduce((sum, i) => sum + (i.minutes || 0), 0);
 
   // 🎯 3. TASK COUNTS (e.g. 6 / 5)
-  const totalCount = allItems.filter(i => !i.isBonus).length;
-  const completedCount = allItems.filter(i => i.isDone).length;
+  const totalCount = wk.length + hw.length + rv.length;
+  const completedCount = [...wk, ...hw, ...rv].filter(i => i.isDone).length;
 
   return {
     date: d,
@@ -267,12 +247,12 @@ const days: DayPlan[] = windowDates.map((d: string) => {
     revision: { minutes: rv.reduce((s, i) => s + (i.minutes || 0), 0), items: rv },
     projects: { minutes: 0, items: [] },
     
-    // Updated Values
     totalPlanned: dayTotalPlannedMinutes, 
     totalCompleted: dayTotalDoneMinutes,
     plannedTaskCount: totalCount,   
     completedTaskCount: completedCount,
-    spare: Math.max(0, baseCapMap[d] - dayTotalPlannedMinutes)
+    // Spare now correctly shows negative if the new task caused an overload
+    spare: Math.max(0, baseCapMap[d] - dayTotalPlannedMinutes) 
   };
 });
 

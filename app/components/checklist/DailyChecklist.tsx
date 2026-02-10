@@ -14,7 +14,13 @@ interface Props {
 export default function DailyChecklist({ day, completions }: Props) {
   // 1. Map all items and normalize the data structure
   const allPossibleItems = [
-    ...day.homework.items.map(i => ({ ...i, type: "deadline_task", section: "Homework" })),
+    ...day.homework.items.map(i => ({ 
+      ...i, 
+      type: "deadline_task", 
+      section: "Homework",
+      // 🎯 ADD THIS: Ensure we know if it's physically past the deadline
+      isOverdue: i.dueDate < new Date().toISOString().split('T')[0]
+    })),
     ...day.weekly.items.map(i => ({ ...i, type: "weekly_task", section: "Weekly Tasks" })),
     // 🎯 FIX: Map stored revision slots using their OWN id, not the examId
     ...day.revision.items.map(s => ({ 

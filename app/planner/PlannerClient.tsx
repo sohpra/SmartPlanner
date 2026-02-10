@@ -55,21 +55,30 @@ export default function PlannerPage() {
   const { capacityData, loading: capacityLoading } = usePlannerCapacity();
 
  const activePlan = useMemo(() => {
-    // 🎯 1. Include revisionLoading here
-    const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading && !capacityLoading && !revisionLoading;
-    if (!isDataLoaded || !capacityData) return null;
+  // 🎯 Add a check to ensure we aren't rendering with a partial revision list
+  const isDataLoaded = 
+    !exams.loading && 
+    !projectsLoading && 
+    !deadlinesLoading && 
+    !weeklyLoading && 
+    !capacityLoading && 
+    !revisionLoading;
 
-    return buildWeekPlan({
-      today,
-      numDays: 60,
-      weeklyTasks,
-      deadlines,
-      exams: exams.upcoming || [],
-      projects,
-      completions: completions.allCompletions || [],
-      capacityData,
-      revisionSlots, 
-    });
+  // 🛡️ SECURITY: If the DB is empty but we expect revision, or if 
+  // capacityData hasn't arrived, don't try to build the plan yet.
+  if (!isDataLoaded || !capacityData) return null;
+
+  return buildWeekPlan({
+    today,
+    numDays: 60,
+    weeklyTasks,
+    deadlines,
+    exams: exams.upcoming || [],
+    projects,
+    completions: completions.allCompletions || [],
+    capacityData,
+    revisionSlots, // 🎯 This is now protected by revisionLoading above
+  });
   }, [
     today, 
     exams.upcoming, 
