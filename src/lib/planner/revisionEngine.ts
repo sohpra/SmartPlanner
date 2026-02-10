@@ -213,7 +213,7 @@ demands.filter(d => d.remainingSlots > 0).forEach(d => {
       subject: d.subject,
       examType: d.examType,
       slotMinutes: d.slotMinutes,
-      label: `URGENT: ${getDynamicLabel(d, "")}`,
+      label: getDynamicLabel(d, ""),
     });
     
     day.usedMinutes += d.slotMinutes;
@@ -241,7 +241,7 @@ demands.filter(d => d.remainingSlots > 0).forEach(d => {
       subject: d.subject,
       examType: d.examType,
       slotMinutes: d.slotMinutes,
-      label: `URGENT: ${getDynamicLabel(d, "")}`,
+      label: getDynamicLabel(d, ""),
     });
     
     day.usedMinutes += d.slotMinutes;

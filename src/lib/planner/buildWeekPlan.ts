@@ -92,6 +92,7 @@ export function buildWeekPlan({
       minutes: task.estimated_minutes, 
       dueDate: task.due_date,
       isDone: isDoneToday,
+      subject: task.subject_name || task.subject || "",
       type: 'deadline_task',
       isBonus: false 
     };
@@ -213,27 +214,30 @@ windowDates.forEach(d => {
 });
 
 // 6. FINAL ASSEMBLY (Stable Progress Logic)
+// 6. FINAL ASSEMBLY (The "6/5" Overachiever Logic)
 const days: DayPlan[] = windowDates.map((d: string) => {
-  const isToday = d === today;
   const wk = weeklyItems[d] || [];
   const hw = homeworkItems[d] || [];
   const rv = revisionItems[d] || [];
   const allItems = [...wk, ...hw, ...rv];
   
-  // 🎯 1. STABLE TARGET (The Denominator)
-  // We only count items that were ACTUALLY scheduled for this day.
-  // We exclude any item marked 'isBonus'.
-  const dayTotalPlannedMinutes = occupiedCap[d] || 0;
+  // 🎯 1. PLANNED MINUTES (The Target)
+  // We exclude bonuses so the target doesn't move when you do extra work.
+  const dayTotalPlannedMinutes = allItems
+    .filter(i => !i.isBonus) 
+    .reduce((sum, i) => sum + (i.minutes || 0), 0);
 
-  // 🎯 2. ACTUAL PROGRESS (The Numerator)
-  // We count EVERYTHING that is checked off.
-  const dayTotalDoneMinutes = [...wk, ...hw, ...rv]
+  // 🎯 2. ACTUAL MINUTES (The Progress)
+  const dayTotalDoneMinutes = allItems
     .filter(i => i.isDone)
     .reduce((sum, i) => sum + (i.minutes || 0), 0);
 
-  // 🎯 3. TASK COUNTS (e.g. 6 / 5)
-  const totalCount = wk.length + hw.length + rv.length;
-  const completedCount = [...wk, ...hw, ...rv].filter(i => i.isDone).length;
+  // 🎯 3. TASK COUNTS (The "6/5" Logic)
+  // completedCount: Counts EVERY item that is done.
+  const completedCount = allItems.filter(i => i.isDone).length;
+  
+  // plannedCount: Only counts items that were meant for today.
+  const plannedCount = allItems.filter(i => !i.isBonus).length;
 
   return {
     date: d,
@@ -249,10 +253,9 @@ const days: DayPlan[] = windowDates.map((d: string) => {
     
     totalPlanned: dayTotalPlannedMinutes, 
     totalCompleted: dayTotalDoneMinutes,
-    plannedTaskCount: totalCount,   
-    completedTaskCount: completedCount,
-    // Spare now correctly shows negative if the new task caused an overload
-    spare: Math.max(0, baseCapMap[d] - dayTotalPlannedMinutes) 
+    plannedTaskCount: plannedCount,   // This becomes the '5'
+    completedTaskCount: completedCount, // This becomes the '6'
+    spare: Math.max(0, baseCapMap[d] - dayTotalPlannedMinutes)
   };
 });
 

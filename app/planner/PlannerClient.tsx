@@ -51,49 +51,28 @@ export default function PlannerPage() {
   const { tasks: weeklyTasks = [], isLoading: weeklyLoading } = useWeeklyTasks();
   const completions = useDailyCompletions(new Date(), updateTaskStatusLocally);
   const { slots: revisionSlots, isLoading: revisionLoading } = useRevision();
-  // 🎯 1. Fetch Capacity Data
   const { capacityData, loading: capacityLoading } = usePlannerCapacity();
 
- const activePlan = useMemo(() => {
-  // 🎯 Add a check to ensure we aren't rendering with a partial revision list
-  const isDataLoaded = 
-    !exams.loading && 
-    !projectsLoading && 
-    !deadlinesLoading && 
-    !weeklyLoading && 
-    !capacityLoading && 
-    !revisionLoading;
+  const activePlan = useMemo(() => {
+    const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading && !capacityLoading && !revisionLoading;
+    if (!isDataLoaded || !capacityData) return null;
 
-  // 🛡️ SECURITY: If the DB is empty but we expect revision, or if 
-  // capacityData hasn't arrived, don't try to build the plan yet.
-  if (!isDataLoaded || !capacityData) return null;
-
-  return buildWeekPlan({
-    today,
-    numDays: 60,
-    weeklyTasks,
-    deadlines,
-    exams: exams.upcoming || [],
-    projects,
-    completions: completions.allCompletions || [],
-    capacityData,
-    revisionSlots, // 🎯 This is now protected by revisionLoading above
-  });
+    return buildWeekPlan({
+      today,
+      numDays: 60,
+      weeklyTasks,
+      deadlines,
+      exams: exams.upcoming || [],
+      projects,
+      completions: completions.allCompletions || [],
+      capacityData,
+      revisionSlots, 
+    });
   }, [
-    today, 
-    exams.upcoming, 
-    projects, 
-    deadlines, 
-    weeklyTasks, 
-    exams.loading, 
-    projectsLoading, 
-    deadlinesLoading, 
-    weeklyLoading, 
-    completions.allCompletions,
-    capacityData,
-    capacityLoading,
-    revisionSlots,   
-    revisionLoading
+    today, exams.upcoming, projects, deadlines, weeklyTasks, 
+    exams.loading, projectsLoading, deadlinesLoading, weeklyLoading, 
+    completions.allCompletions, capacityData, capacityLoading, 
+    revisionSlots, revisionLoading
   ]);
   
   if (!activePlan) {
@@ -141,8 +120,6 @@ export default function PlannerPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
-          
-          {/* Main Content Area */}
           <div className={`${view === "daily" ? "lg:col-span-8" : "col-span-full"}`}>
             {view === "daily" && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -154,7 +131,6 @@ export default function PlannerPage() {
                     <h2 className="text-3xl font-black text-gray-900 italic tracking-tighter">Today</h2>
                   </div>
 
-                  {/* 🎯 RECOVERY, OVERLOAD & OVERRIDE LOGIC */}
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     {(() => {
                       const overage = todayPlan.totalPlanned - todayPlan.baseCapacity;
@@ -165,118 +141,125 @@ export default function PlannerPage() {
                       const todayLabel = capacityData?.labels[today];
                       const elements = [];
 
-                      // 1. Show Specific Override Label (e.g., Half Term)
                       if (todayLabel) {
                         elements.push(
                           <div key="override" className="bg-blue-600 border border-blue-400 px-4 py-1.5 rounded-full flex items-center gap-2 animate-in fade-in slide-in-from-right-4">
                             <Calendar className="w-3 h-3 text-white" />
-                            <span className="text-white text-[10px] font-black uppercase italic">
-                              {todayLabel} Mode
-                            </span>
+                            <span className="text-white text-[10px] font-black uppercase italic">{todayLabel} Mode</span>
                           </div>
                         );
                       }
 
-                      // 2. Recovery Mode (Overdue tasks)
                       if (overage > 0 && hasSignificantOverdue) {
                         elements.push(
                           <div key="recovery" className="bg-amber-50 border border-amber-100 px-4 py-1.5 rounded-full flex items-center gap-2">
                             <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                            <span className="text-amber-700 text-[10px] font-black uppercase italic">
-                              Recovery: +{overage}m
-                            </span>
+                            <span className="text-amber-700 text-[10px] font-black uppercase italic">Recovery: +{overage}m</span>
                           </div>
                         );
-                      } 
-                      // 3. Standard Overload
-                      else if (overage >= 15) {
+                      } else if (overage >= 15) {
                         elements.push(
                           <div key="overload" className="bg-red-50 border border-red-100 px-4 py-1.5 rounded-full flex items-center gap-2">
                             <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                            <span className="text-red-700 text-[10px] font-black uppercase italic">
-                              Overload +{overage}m
-                            </span>
+                            <span className="text-red-700 text-[10px] font-black uppercase italic">Overload +{overage}m</span>
                           </div>
                         );
                       }
-
                       return elements;
                     })()}
                   </div>
                 </div>
 
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm relative overflow-hidden group">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Tasks Completed</p>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-baseline gap-1">
-                    <p className={`text-5xl font-black transition-colors duration-500 ${
-                      todayPlan.completedTaskCount > todayPlan.plannedTaskCount ? 'text-emerald-600' : 
-                      todayPlan.completedTaskCount === todayPlan.plannedTaskCount ? 'text-blue-600' : 'text-slate-900'
-                    }`}>
-                      {todayPlan.completedTaskCount}
-                    </p>
-                    <p className="text-xl font-bold text-slate-300 italic">/ {todayPlan.plannedTaskCount}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* --- CARD 1: MISSION STATUS --- */}
+                  <div className={`p-6 bg-white rounded-3xl border transition-all duration-500 relative overflow-hidden group ${
+                    todayPlan.completedTaskCount > todayPlan.plannedTaskCount 
+                      ? 'ring-4 ring-emerald-500/20 border-emerald-100 shadow-[0_0_30px_-10px_rgba(16,185,129,0.4)]' 
+                      : todayPlan.completedTaskCount === todayPlan.plannedTaskCount && todayPlan.plannedTaskCount > 0
+                      ? 'border-emerald-200 bg-emerald-50/30'
+                      : 'border-gray-100 shadow-sm'
+                  }`}>
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 italic">Current Mission Status</p>
+                    <div className="flex items-center justify-between relative z-10">
+                      <div className="flex items-baseline gap-1">
+                        <p className={`text-5xl font-black transition-colors duration-500 ${
+                          todayPlan.completedTaskCount >= todayPlan.plannedTaskCount ? 'text-emerald-600' : 'text-slate-900'
+                        }`}>
+                          {todayPlan.completedTaskCount}
+                        </p>
+                        <p className="text-xl font-bold text-slate-300 italic">/ {todayPlan.plannedTaskCount}</p>
+                      </div>
+                      <div className="text-right flex flex-col items-end gap-1">
+                        {todayPlan.completedTaskCount > todayPlan.plannedTaskCount ? (
+                          <div className="flex flex-col items-end animate-in zoom-in-50 duration-500">
+                            <div className="bg-emerald-600 text-white text-[8px] font-black uppercase px-2 py-0.5 rounded-full mb-1 tracking-tighter">Legendary Performance</div>
+                            <p className="text-[9px] font-black text-emerald-600 uppercase italic tracking-tighter flex items-center gap-1">
+                              <Rocket className="w-3 h-3 animate-bounce" /> Over and beyond
+                            </p>
+                          </div>
+                        ) : todayPlan.completedTaskCount === todayPlan.plannedTaskCount && todayPlan.plannedTaskCount > 0 ? (
+                          <div className="flex flex-col items-end animate-in fade-in duration-700">
+                            <div className="h-7 w-7 rounded-full bg-emerald-100 flex items-center justify-center mb-1"><ShieldCheck className="w-4 h-4 text-emerald-600" /></div>
+                            <p className="text-[9px] font-black text-emerald-600 uppercase italic tracking-tighter">Well done</p>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-end opacity-60">
+                            <div className="h-7 w-7 rounded-full bg-slate-100 flex items-center justify-center mb-1"><Target className="w-4 h-4 text-blue-600 animate-pulse" /></div>
+                            <p className="text-[9px] font-black text-slate-500 uppercase italic tracking-tighter">Keep Going</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-right flex flex-col items-end gap-1">
-                    {todayPlan.completedTaskCount > todayPlan.plannedTaskCount ? (
-                      <div className="flex flex-col items-end animate-in zoom-in-50 duration-500">
-                        <div className="h-7 w-7 rounded-full bg-emerald-100 flex items-center justify-center mb-1"><Rocket className="w-4 h-4 text-emerald-600" /></div>
-                        <p className="text-[9px] font-black text-emerald-600 uppercase italic tracking-tighter">Way Ahead</p>
-                      </div>
-                    ) : todayPlan.completedTaskCount === todayPlan.plannedTaskCount && todayPlan.plannedTaskCount > 0 ? (
-                      <div className="flex flex-col items-end">
-                        <div className="h-7 w-7 rounded-full bg-blue-100 flex items-center justify-center mb-1"><ShieldCheck className="w-4 h-4 text-blue-600" /></div>
-                        <p className="text-[9px] font-black text-blue-600 uppercase italic tracking-tighter">Caught Up</p>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-end opacity-40">
-                        <div className="h-7 w-7 rounded-full bg-slate-50 flex items-center justify-center mb-1"><Target className="w-4 h-4 text-slate-400" /></div>
-                        <p className="text-[9px] font-black text-slate-400 uppercase italic tracking-tighter">Keep Going</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
 
-              <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Study Load</p>
-                <div className="flex flex-col">
-                  <div className="flex items-baseline gap-1">
-                    <p className={`text-5xl font-black italic transition-colors duration-500 ${
-                      todayPlan.totalCompleted > todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-900'
-                    }`}>
-                      {Math.floor(todayPlan.totalCompleted / 60)}h<span className="text-2xl">{todayPlan.totalCompleted % 60}m</span>
-                    </p>
-                    <p className="text-xl font-bold text-slate-300 italic">
-                      / {Math.floor(todayPlan.totalPlanned / 60)}h{todayPlan.totalPlanned % 60}m
-                    </p>
-                  </div>
-                  <div className="mt-4 flex flex-col gap-2">
-                    <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-1000 ease-out ${
-                          todayPlan.totalCompleted > todayPlan.totalPlanned ? 'bg-emerald-500' : 'bg-blue-600'
-                        }`}
-                        style={{ width: `${Math.min(100, (todayPlan.totalCompleted / (todayPlan.totalPlanned || 1)) * 100)}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <p className={`text-[10px] font-black uppercase italic ${
-                        todayPlan.totalCompleted > todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-500'
-                      }`}>
-                        {todayPlan.totalCompleted > todayPlan.totalPlanned 
-                          ? `Bonus Time: +${todayPlan.totalCompleted - todayPlan.totalPlanned}m` 
-                          : `${Math.round((todayPlan.totalCompleted / (todayPlan.totalPlanned || 1)) * 100)}% of daily target`}
-                      </p>
-                      <div className="bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-0.5 rounded italic">
-                        Target Locked
+                  {/* --- CARD 2: OUTPUT EFFICIENCY --- */}
+                  <div className={`p-6 bg-white rounded-3xl border transition-all duration-500 ${
+                    todayPlan.totalCompleted >= todayPlan.totalPlanned 
+                      ? 'border-emerald-100 bg-emerald-50/10' 
+                      : 'border-gray-100 shadow-sm'
+                  }`}>
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 italic">Work load</p>
+                    <div className="flex flex-col">
+                      <div className="flex items-baseline gap-1">
+                        <p className={`text-5xl font-black italic transition-colors duration-500 ${
+                          todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-900'
+                        }`}>
+                          {Math.floor(todayPlan.totalCompleted / 60)}h<span className="text-2xl">{todayPlan.totalCompleted % 60}m</span>
+                        </p>
+                        <p className="text-xl font-bold text-slate-300 italic">/ {Math.floor(todayPlan.totalPlanned / 60)}h{todayPlan.totalPlanned % 60}m</p>
+                      </div>
+                      <div className="mt-4 flex flex-col gap-2">
+                        <div className="h-3 w-full bg-gray-100 rounded-full overflow-hidden p-0.5">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-1000 ease-out ${
+                              todayPlan.totalCompleted > todayPlan.totalPlanned ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_15px_rgba(16,185,129,0.5)]' : 
+                              todayPlan.totalCompleted === todayPlan.totalPlanned ? 'bg-emerald-500' : 'bg-blue-600'
+                            }`}
+                            style={{ width: `${Math.min(100, (todayPlan.totalCompleted / (todayPlan.totalPlanned || 1)) * 100)}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between items-center">
+                          {todayPlan.totalCompleted > todayPlan.totalPlanned ? (
+                            <p className="text-[10px] font-black uppercase italic text-emerald-600 flex items-center gap-1.5">
+                              <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+                              Breaking Frontiers: +{todayPlan.totalCompleted - todayPlan.totalPlanned}m
+                            </p>
+                          ) : todayPlan.totalCompleted === todayPlan.totalPlanned && todayPlan.totalPlanned > 0 ? (
+                            <p className="text-[10px] font-black uppercase italic text-emerald-600">Peak Performance Attained</p>
+                          ) : (
+                            <p className="text-[10px] font-black uppercase italic text-slate-500">On the way</p>
+                          )}
+                          <div className={`text-[8px] font-black uppercase px-2 py-0.5 rounded italic tracking-tighter ${
+                            todayPlan.totalCompleted > todayPlan.totalPlanned ? 'bg-emerald-600 text-white animate-bounce' : 
+                            todayPlan.totalCompleted === todayPlan.totalPlanned ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white'
+                          }`}>
+                            {todayPlan.totalCompleted > todayPlan.totalPlanned ? 'GOD MODE' : todayPlan.totalCompleted === todayPlan.totalPlanned ? 'STREAK ACTIVE' : 'STEADY'}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            </div>
                 
                 <section className="bg-white p-1 rounded-[2.1rem] ring-4 ring-blue-600/10 border border-blue-600/20">
                   <div className="bg-white p-6 rounded-[2rem]">

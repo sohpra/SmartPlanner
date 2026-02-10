@@ -18,6 +18,7 @@ export default function DailyChecklist({ day, completions }: Props) {
       ...i, 
       type: "deadline_task", 
       section: "Homework",
+      subject: i.subject_name || i.subject,
       // 🎯 ADD THIS: Ensure we know if it's physically past the deadline
       isOverdue: i.dueDate < new Date().toISOString().split('T')[0]
     })),
