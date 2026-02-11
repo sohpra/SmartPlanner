@@ -202,10 +202,10 @@ export function AddTaskModal({ open, onClose }: { open: boolean; onClose: () => 
                   </div>
                   <div>
                     <p className={`text-[10px] font-black uppercase tracking-widest ${isFixed ? 'text-blue-600' : 'text-slate-500'}`}>
-                      {isFixed ? 'Fixed Session' : 'Floating Objective'}
+                      {isFixed ? 'Fixed' : 'Floating'}
                     </p>
                     <p className="text-[9px] text-slate-400 font-bold italic">
-                      {isFixed ? 'Locked to specific date' : 'Engine finds the best gap'}
+                      {isFixed ? 'Locked to specific date' : 'Engine finds best gap before due date'}
                     </p>
                   </div>
                 </div>
