@@ -288,10 +288,7 @@ export default function PlannerPage() {
 
           {view === "daily" && (
             <aside className="lg:col-span-4 space-y-6 animate-in fade-in lg:slide-in-from-right-4 duration-500">
-              <div className="bg-white rounded-[2rem] border border-gray-100 p-6 shadow-sm">
-                  <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-6">Up Next</h3>
-                  <TomorrowChecklist day={tomorrowPlan} />
-              </div>
+              <TomorrowChecklist day={tomorrowPlan} />
               <ComingUp projects={projects || []} exams={exams.upcoming || []} />
             </aside>
           )}

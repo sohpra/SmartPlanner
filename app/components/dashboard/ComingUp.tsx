@@ -9,11 +9,10 @@ interface ComingUpProps {
 
 export function ComingUp({ exams, projects = [] }: ComingUpProps) {
   const today = new Date().toISOString().slice(0, 10);
-  const tomorrow = addDays(today, 1);
+  // 🎯 Removed 'tomorrow' as a filter constraint to allow all upcoming items
 
   const upcomingMilestones = [
     ...(exams || []).map(e => {
-      // 🎯 THE FIX: Check for Competitive Name or Board before generic subject
       let displayName = `${e.subject} Exam`;
       
       if (e.exam_type === 'Competitive' && e.competitive_exam_name) {
@@ -36,15 +35,20 @@ export function ComingUp({ exams, projects = [] }: ComingUpProps) {
       subject: p.subject 
     }))
   ]
-  .filter(event => event.date > tomorrow)
+  // 🎯 THE FIX: Changed to >= today to include today and tomorrow
+  .filter(event => event.date >= today)
   .sort((a, b) => a.date.localeCompare(b.date))
   .slice(0, 4);
 
   return (
     <div className="bg-white rounded-[2rem] border border-slate-100 p-6 shadow-sm">
-      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 italic">
-        Upcoming Milestones
-      </h3>
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-black text-slate-900 uppercase tracking-tighter italic">
+            Coming Up
+          </h3>
+        </div>
+      </div>
       
       <div className="space-y-3">
         {upcomingMilestones.length === 0 ? (
@@ -58,18 +62,29 @@ export function ComingUp({ exams, projects = [] }: ComingUpProps) {
               / (1000 * 60 * 60 * 24)
             );
 
+            // 🎯 NEW: Urgency detection
+            const isTomorrow = diff === 1;
+            const isToday = diff === 0;
+
             return (
-              <div key={idx} className="p-4 rounded-2xl border border-slate-100 bg-white shadow-sm transition-all hover:border-blue-200 group">
+              <div key={idx} className={`p-4 rounded-2xl border transition-all hover:border-blue-200 group ${
+                isToday || isTomorrow ? 'bg-red-50/30 border-red-100' : 'bg-white border-slate-100 shadow-sm'
+              }`}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                       <h4 className="text-sm font-black text-slate-800 leading-tight italic tracking-tight">
+                       { (isToday || isTomorrow) && <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" /> }
+                       <h4 className={`text-sm font-black leading-tight italic tracking-tight ${
+                         isToday || isTomorrow ? 'text-red-900' : 'text-slate-800'
+                       }`}>
                          {event.name}
                        </h4>
                     </div>
                     {event.subject && (
                       <div className="flex items-center gap-2">
-                        <span className="text-[8px] font-black text-blue-600 uppercase tracking-tighter">
+                        <span className={`text-[8px] font-black uppercase tracking-tighter ${
+                          isToday || isTomorrow ? 'text-red-600' : 'text-blue-600'
+                        }`}>
                           {event.subject}
                         </span>
                         <span className="h-0.5 w-0.5 rounded-full bg-slate-200" />
@@ -80,8 +95,12 @@ export function ComingUp({ exams, projects = [] }: ComingUpProps) {
                     )}
                   </div>
                   <div className="shrink-0 flex flex-col items-end">
-                    <span className="text-[9px] font-black px-2.5 py-1 rounded-lg uppercase bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
-                      In {diff}d
+                    <span className={`text-[9px] font-black px-2.5 py-1 rounded-lg uppercase border shadow-sm ${
+                      isToday ? 'bg-red-600 text-white border-red-700' :
+                      isTomorrow ? 'bg-red-50 text-red-600 border-red-100' :
+                      'bg-blue-50 text-blue-600 border-blue-100'
+                    }`}>
+                      {isToday ? 'TODAY' : isTomorrow ? 'TOMORROW' : `In ${diff}d`}
                     </span>
                   </div>
                 </div>
