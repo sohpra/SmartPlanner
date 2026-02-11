@@ -188,18 +188,23 @@ for (const task of sortedHw) {
 }
 
 // --- 5. REVISION (The Iron-Clad Unified Architect) ---
+// --- 5. REVISION (The Iron-Clad Unified Architect) ---
 const revisionItems: Record<string, any[]> = {};
 windowDates.forEach(d => revisionItems[d] = []);
 
 const allSlots = (revisionSlots || []) as any[];
 
-// Separating the "Done" from "Pending" using your completion keys
-const doneSlots = allSlots.filter(s => todayCompletionKeys.has(`revision:${s.id}`) || s.is_completed);
-const pendingSlots = allSlots.filter(s => !todayCompletionKeys.has(`revision:${s.id}`) && !s.is_completed);
+// 🎯 THE FIX: Use a consistent key to filter out completed items
+const isSlotDone = (s: any) => 
+  s.is_completed === true || 
+  todayCompletionKeys.has(`revision:${s.id}`) || 
+  todayCompletionKeys.has(s.id);
 
-// --- STEP 1: Process Done Items (The Hydra Guard) ---
+const doneSlots = allSlots.filter(s => isSlotDone(s));
+const pendingSlots = allSlots.filter(s => !isSlotDone(s));
+
+// --- STEP 1: Process Done Items (Pin to Today) ---
 doneSlots.forEach(s => {
-  // Completed items are visually pinned to "Today" regardless of original assigned date
   if (revisionItems[today]) {
     const mins = s.duration_minutes || s.slotMinutes || 30;
     revisionItems[today].push({ 
@@ -209,35 +214,31 @@ doneSlots.forEach(s => {
       subject: s.subject || "Revision",
       type: 'revision', 
       isDone: true, 
-      minutes: mins 
+      minutes: mins,
+      isBonus: s.date > today // Typically, revision isn't a "bonus" in the same way HW is
     });
-    // Record capacity so the progress bar reflects work done
     occupiedCap[today] += mins;
   }
 });
 
-// --- STEP 2: Place Pending Slots (Trust the Database) ---
-// We no longer "calculate" eligibility. If the Engine put it on a date, we show it there.
+// --- STEP 2: Place Pending Slots (Strict DB Obedience) ---
 pendingSlots.forEach(slot => {
-  // Normalize the date from ISO or DB string to YYYY-MM-DD
   const assignedDate = slot.date ? String(slot.date).split('T')[0] : null;
 
-  // Only render if the date falls within our current 60-day window
-  if (assignedDate && revisionItems[assignedDate]) {
+  // 🎯 SAFETY CHECK: Ensure we don't show pending slots from the past
+  if (assignedDate && assignedDate >= today && revisionItems[assignedDate]) {
     const mins = slot.slotMinutes || slot.duration_minutes || 30;
     
     revisionItems[assignedDate].push({
       id: slot.id,
-      // 'name' is what the WeeklyView/DayColumn looks for
       name: slot.label || slot.displayName || slot.description || "Revision",
-      subject: slot.subject || (slot.exam ? slot.exam.subject : "Revision"),
+      subject: slot.subject || "Revision",
       minutes: mins,
       isDone: false,
       type: 'revision',
       examId: slot.exam_id
     });
     
-    // Increment the capacity tracker for that specific day
     occupiedCap[assignedDate] += mins;
   }
 });

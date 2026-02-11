@@ -98,6 +98,34 @@ export default function PlannerPage() {
     fetchStats();
   }, [completions.allCompletions]); 
 
+  // Auto sync count 
+  useEffect(() => {
+    if (!activePlan?.days[0]) return;
+    
+    const todayPlan = activePlan.days[0];
+    const isSecured = todayPlan.completedTaskCount >= todayPlan.plannedTaskCount;
+    const isElite = todayPlan.completedTaskCount > todayPlan.plannedTaskCount;
+    const hasTasks = todayPlan.plannedTaskCount > 0;
+
+    if (hasTasks) {
+      const syncStats = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        // 🎯 AUTO-SYNC: Whenever the count changes, update the DB stats
+        await supabase.rpc('sync_daily_stats', {
+          target_user_id: user.id,
+          is_mission_secured: isSecured,
+          is_elite_day: isElite,
+          planned_count: todayPlan.plannedTaskCount,    
+          completed_count: todayPlan.completedTaskCount 
+        });
+      };
+      
+      syncStats();
+    }
+  }, [activePlan?.days[0]?.completedTaskCount, activePlan?.days[0]?.plannedTaskCount]);
+
   // 🎉 Confetti Celebration Logic
   useEffect(() => {
     if (!activePlan?.days[0]) return;
@@ -199,12 +227,20 @@ export default function PlannerPage() {
                         <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-1 rounded whitespace-nowrap z-50">Mission Secured</div>
                       </div>
 
-                      {/* Elite Badge Disabled Visually */}
-                      <div className="group relative opacity-40">
-                        <div className="h-8 w-8 rounded-xl flex items-center justify-center bg-gray-300/50">
-                          <Target className="w-4 h-4 text-gray-400" />
+                      {/* 🎯 ELITE BADGE - Now Dynamic */}
+                      <div className="group relative">
+                        <div className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all duration-500 ${
+                          todayPlan.completedTaskCount > todayPlan.plannedTaskCount && todayPlan.plannedTaskCount > 0 
+                          ? 'bg-purple-600 shadow-lg shadow-purple-200' 
+                          : 'bg-gray-300/50 opacity-40'
+                        }`}>
+                          <Target className={`w-4 h-4 ${
+                            todayPlan.completedTaskCount > todayPlan.plannedTaskCount ? 'text-white' : 'text-gray-400'
+                          }`} />
                         </div>
-                        <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-1 rounded whitespace-nowrap z-50 italic">Elite Status Locked</div>
+                        <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-1 rounded whitespace-nowrap z-50 italic">
+                          {todayPlan.completedTaskCount > todayPlan.plannedTaskCount ? 'Elite Performance' : 'Elite Status Locked'}
+                        </div>
                       </div>
                     </div>
 

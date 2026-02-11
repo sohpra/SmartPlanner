@@ -43,37 +43,10 @@ export default function DailyChecklist({ day, completions }: Props) {
   const finishedItems = allPossibleItems.filter(item => completions.completed.has(`${item.type}:${item.id}`));
 
   // 🎯 3. NEW: Sync Logic
-  // This function wraps the UI toggle and the DB sync
-  // 🎯 UPDATE handleToggle inside DailyChecklist.tsx
-// 🎯 UPDATE the toggle logic inside DailyChecklist.tsx
-const handleToggle = async (type: string, id: string) => {
-  // 1. Perform the UI toggle
-  await completions.toggle(type, id);
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-
-  const key = `${type}:${id}`;
-  const willBeDone = !completions.completed.has(key);
+  const handleToggle = async (type: string, id: string) => {
+    await completions.toggle(type, id);
   
-  // 2. Calculate counts based on current items
-  // finishedItems is calculated at the top of your component
-  const currentDone = finishedItems.length;
-  const newDoneCount = willBeDone ? currentDone + 1 : currentDone - 1;
-  
-  // 🎯 THE STABILITY FIX: 
-  // We compare against the STATIC goalpost passed from PlannerPage
-  const secured = newDoneCount >= completions.plannedTaskCount;
-  
-  // Note: elite is set to false for now as per your request to hide it
-  const elite = false; 
-
-  await supabase.rpc('sync_daily_stats', {
-    target_user_id: user.id,
-    is_mission_secured: secured,
-    is_elite_day: elite
-  });
-};
+  };
 
   const TaskRow = ({ item, isDone }: { item: any, isDone: boolean }) => (
     <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${

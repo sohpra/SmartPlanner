@@ -96,14 +96,15 @@ const toggleDeadlineTask = useCallback(async (source_type: string, source_id: st
       
       if (dcErr) throw dcErr;
 
-      // 2. Specific Table Updates
-      if (source_type === "revision") {
-        const { error: revErr } = await supabase
-          .from("revision_slots")
-          .update({ is_completed: true })
-          .match({ id: source_id, user_id: userId });
-        if (revErr) throw revErr;
-      }
+    // 2. Specific Table Updates
+    if (source_type === "revision") {
+      const { error: revErr } = await supabase
+        .from("revision_slots")
+        .update({ is_completed: !isCurrentlyDone }) // 🎯 THIS marks it in the DB
+        .match({ id: source_id, user_id: userId });
+      
+      if (revErr) console.error("❌ REVISION SYNC ERROR:", revErr);
+    }
 
       if (source_type === "deadline_task") {
         await supabase.from("deadline_tasks").update({ status: 'completed' }).eq("id", source_id);

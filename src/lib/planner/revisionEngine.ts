@@ -116,6 +116,8 @@ export function buildRevisionDemand(exam: ExamInput): RevisionDemand | null {
 
 /* --- Main Engine --- */
 
+/* --- Main Engine --- */
+
 export function planRevisionSlots(
   exams: ExamInput[],
   opts: { startDate: string; numDays: number; capacityByDate: Record<string, number>; includeExamDay: boolean }
@@ -135,15 +137,14 @@ export function planRevisionSlots(
     slots: [],
   }));
 
-  /* --- PHASE 0: ANCHORS (Strictly Capped) --- */
+  /* --- PHASE 0: THE FINAL PUSH (Day Before) --- */
   demands.forEach(d => {
     const dayBefore = addDays(d.examDate, -1);
     const targetDay = days.find(day => day.date === dayBefore);
     if (targetDay) {
       const lockMinutes = d.examType === "Internal" ? 30 : 60;
       
-      // 🎯 THE FIX: Even "Golden" slots MUST respect the gap.
-      // If Today is the day before an exam and gap is 0, this will skip.
+      // Respect capacity: Don't kill "Today" if it's already full of homework
       if (targetDay.remainingMinutes >= lockMinutes) {
         targetDay.slots.unshift({
           date: targetDay.date,
@@ -160,94 +161,91 @@ export function planRevisionSlots(
     }
   });
 
-/* --- PHASE A: PROTECT TODAY & INTERLEAVE --- */
-/* --- PHASE A: INTERLEAVING (The "Polite" Phase) --- */
-for (let pass = 1; pass <= 2; pass++) {
-  for (const day of days) {
-    if (day.remainingMinutes <= 0) continue;
+  /* --- PHASE A: POLITE INTERLEAVING --- */
+  // We do two passes to spread subjects out
+  for (let pass = 1; pass <= 2; pass++) {
+    for (const day of days) {
+      if (day.remainingMinutes <= 0) continue;
 
-    for (const d of demands) {
-      if (d.remainingSlots <= 0) continue;
-      if (daysBetween(day.date, d.examDate) <= 0) continue;
-      
-      if (day.remainingMinutes < d.slotMinutes) continue;
+      for (const d of demands) {
+        if (d.remainingSlots <= 0) continue;
+        const gap = daysBetween(day.date, d.examDate);
+        if (gap <= 0) continue;
+        
+        // Don't overfill today in polite mode
+        if (day.remainingMinutes < d.slotMinutes) continue;
 
-      const subjectCount = day.slots.filter(s => s.subject === d.subject).length;
-      
-      // 🎯 REVERTED: Internal exams stay at 1 slot/day to prevent crowding.
-      // Competitive/Board exams can still take 2 slots if space permits.
-      const limit = pass === 1 ? 1 : (d.examType === "Internal" ? 1 : 2);
+        const subjectCount = day.slots.filter(s => s.subject === d.subject).length;
+        
+        // Internals: 1 per day. Boards/Competitive: 2 per day in pass 2.
+        const limit = d.examType === "Internal" ? 1 : (pass === 1 ? 1 : 2);
 
-      if (subjectCount < limit) {
-        day.slots.push({
-          date: day.date,
-          examId: d.examId,
-          subject: d.subject,
-          examType: d.examType,
-          slotMinutes: d.slotMinutes,
-          label: getDynamicLabel(d, ""),
-        });
-        day.usedMinutes += d.slotMinutes;
-        day.remainingMinutes -= d.slotMinutes;
-        d.remainingSlots--;
+        if (subjectCount < limit) {
+          day.slots.push({
+            date: day.date,
+            examId: d.examId,
+            subject: d.subject,
+            examType: d.examType,
+            slotMinutes: d.slotMinutes,
+            label: getDynamicLabel(d, ""),
+          });
+          day.usedMinutes += d.slotMinutes;
+          day.remainingMinutes -= d.slotMinutes;
+          d.remainingSlots--;
+        }
       }
     }
   }
-}
 
-/* --- PHASE B: EMERGENCY OVERFLOW (The "Last Resort" Phase) --- */
-demands.filter(d => d.remainingSlots > 0).forEach(d => {
-  // 🎯 REFINED: Only "Emergency Overload" the 2 days before the exam.
-  // This prevents the engine from overloading you too early in the week.
-  const emergencyWindow = days.filter(day => {
-    const gap = daysBetween(day.date, d.examDate);
-    return gap > 0 && gap <= 2; 
+  /* --- PHASE B: EMERGENCY OVERFLOW (Capacity Respecting) --- */
+  // If we have slots left, we try to fit them in the 4 days before, but still respect 0 gap.
+  demands.filter(d => d.remainingSlots > 0).forEach(d => {
+    const emergencyWindow = days.filter(day => {
+      const gap = daysBetween(day.date, d.examDate);
+      return gap > 0 && gap <= 4; 
+    });
+
+    for (const day of emergencyWindow) {
+      if (d.remainingSlots <= 0) break;
+      if (day.remainingMinutes < d.slotMinutes) continue; // 🎯 THE FIX: Respect the bottom of the budget
+
+      day.slots.push({
+        date: day.date,
+        examId: d.examId,
+        subject: d.subject,
+        examType: d.examType,
+        slotMinutes: d.slotMinutes,
+        label: getDynamicLabel(d, ""),
+      });
+      
+      day.usedMinutes += d.slotMinutes;
+      day.remainingMinutes -= d.slotMinutes;
+      d.remainingSlots--;
+    }
   });
 
-  for (const day of emergencyWindow) {
-    if (d.remainingSlots <= 0) break;
+  /* --- PHASE C: THE "NO CHOICE" OVERLOAD (Strict Crisis Only) --- */
+  // Only if we reach the day before and there is literally NO other time.
+  demands.filter(d => d.remainingSlots > 0).forEach(d => {
+    const dayBefore = addDays(d.examDate, -1);
+    const targetDay = days.find(day => day.date === dayBefore);
 
-    day.slots.push({
-      date: day.date,
-      examId: d.examId,
-      subject: d.subject,
-      examType: d.examType,
-      slotMinutes: d.slotMinutes,
-      label: getDynamicLabel(d, ""),
-    });
-    
-    day.usedMinutes += d.slotMinutes;
-    day.remainingMinutes -= d.slotMinutes;
-    d.remainingSlots--;
-  }
-});
-
-/* --- PHASE B: EMERGENCY OVERLOAD (The "No Choice" Phase) --- */
-// If we STILL have slots left, we force them in, even if it exceeds 150m.
-demands.filter(d => d.remainingSlots > 0).forEach(d => {
-  // We only look at the 4 days leading up to the exam for an overload.
-  const emergencyWindow = days.filter(day => {
-    const gap = daysBetween(day.date, d.examDate);
-    return gap > 0 && gap <= 4;
+    if (targetDay && d.remainingSlots > 0) {
+      // Limit force-feeding to 1 extra slot so we don't have 10 slots on one day
+      const forceMins = d.slotMinutes;
+      targetDay.slots.push({
+        date: targetDay.date,
+        examId: d.examId,
+        subject: d.subject,
+        examType: d.examType,
+        slotMinutes: forceMins,
+        label: `CRISIS: ${getDynamicLabel(d, "")}`,
+      });
+      targetDay.usedMinutes += forceMins;
+      targetDay.remainingMinutes -= forceMins;
+      d.remainingSlots--;
+    }
   });
 
-  for (const day of emergencyWindow) {
-    if (d.remainingSlots <= 0) break;
-
-    // We add the slot even if remainingMinutes is 0 or negative.
-    day.slots.push({
-      date: day.date,
-      examId: d.examId,
-      subject: d.subject,
-      examType: d.examType,
-      slotMinutes: d.slotMinutes,
-      label: getDynamicLabel(d, ""),
-    });
-    
-    day.usedMinutes += d.slotMinutes;
-    day.remainingMinutes -= d.slotMinutes; // This will go negative, showing the overload in UI
-    d.remainingSlots--;
-  }
-});
   return { days, demands, unmet: demands.filter(d => d.remainingSlots > 0), notes: [] };
 }
