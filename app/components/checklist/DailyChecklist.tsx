@@ -1,33 +1,35 @@
 "use client";
 
 import { DayPlan } from "@/lib/planner/buildWeekPlan";
+import { supabase } from "@/lib/supabase/client";
 
+// 🎯 VERIFY THIS in DailyChecklist.tsx
 interface Props {
   day: DayPlan;
   completions: {
     completed: Set<string>;
-    toggle: (type: string, id: string) => void;
+    toggle: (type: string, id: string) => void | Promise<void>;
     dateKey: string;
+    plannedTaskCount: number;      // Matches PlannerClient
+    totalPlannedMinutes: number;   // Matches PlannerClient
   };
 }
 
 export default function DailyChecklist({ day, completions }: Props) {
-  // 1. Map all items and normalize the data structure
+  // 1. Data normalization (remains same)
   const allPossibleItems = [
     ...day.homework.items.map(i => ({ 
       ...i, 
       type: "deadline_task", 
       section: "Homework",
       subject: i.subject_name || i.subject,
-      // 🎯 ADD THIS: Ensure we know if it's physically past the deadline
       isOverdue: i.dueDate < new Date().toISOString().split('T')[0]
     })),
     ...day.weekly.items.map(i => ({ ...i, type: "weekly_task", section: "Weekly Tasks" })),
-    // 🎯 FIX: Map stored revision slots using their OWN id, not the examId
     ...day.revision.items.map(s => ({ 
-      id: s.id, // Use the slot's unique ID
+      id: s.id, 
       examId: s.examId,
-      name: s.name, // This now contains 'Maths Olympiad' etc.
+      name: s.name, 
       subject: s.subject, 
       minutes: s.minutes,
       type: "revision",
@@ -36,19 +38,43 @@ export default function DailyChecklist({ day, completions }: Props) {
     ...day.projects.items.map(i => ({ ...i, type: "project", section: "Projects" }))
   ];
 
-  // 2. Filter Logic remains the same - it now trusts the specific slot ID
-  const activeItems = allPossibleItems.filter(item => {
-    const key = `${item.type}:${item.id}`;
-    return !completions.completed.has(key);
-  });
+  // 2. Filter Logic
+  const activeItems = allPossibleItems.filter(item => !completions.completed.has(`${item.type}:${item.id}`));
+  const finishedItems = allPossibleItems.filter(item => completions.completed.has(`${item.type}:${item.id}`));
 
-  const finishedItems = allPossibleItems.filter(item => {
-    const key = `${item.type}:${item.id}`;
-    return completions.completed.has(key);
-  });
+  // 🎯 3. NEW: Sync Logic
+  // This function wraps the UI toggle and the DB sync
+  // 🎯 UPDATE handleToggle inside DailyChecklist.tsx
+// 🎯 UPDATE the toggle logic inside DailyChecklist.tsx
+const handleToggle = async (type: string, id: string) => {
+  // 1. Perform the UI toggle
+  await completions.toggle(type, id);
 
-// ... rest of the component (TaskRow, Render logic)
-// Helper to render a task row
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const key = `${type}:${id}`;
+  const willBeDone = !completions.completed.has(key);
+  
+  // 2. Calculate counts based on current items
+  // finishedItems is calculated at the top of your component
+  const currentDone = finishedItems.length;
+  const newDoneCount = willBeDone ? currentDone + 1 : currentDone - 1;
+  
+  // 🎯 THE STABILITY FIX: 
+  // We compare against the STATIC goalpost passed from PlannerPage
+  const secured = newDoneCount >= completions.plannedTaskCount;
+  
+  // Note: elite is set to false for now as per your request to hide it
+  const elite = false; 
+
+  await supabase.rpc('sync_daily_stats', {
+    target_user_id: user.id,
+    is_mission_secured: secured,
+    is_elite_day: elite
+  });
+};
+
   const TaskRow = ({ item, isDone }: { item: any, isDone: boolean }) => (
     <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
       isDone ? "opacity-50 bg-gray-50 border-gray-100 italic" : "bg-white border-gray-200 shadow-sm"
@@ -57,7 +83,8 @@ export default function DailyChecklist({ day, completions }: Props) {
         <input 
           type="checkbox" 
           checked={isDone} 
-          onChange={() => completions.toggle(item.type, item.id)} 
+          // 🎯 Update to use our new handleToggle
+          onChange={() => handleToggle(item.type, item.id)} 
           className="h-5 w-5 rounded border-gray-300 text-blue-600 accent-blue-600 cursor-pointer" 
         />
         <div>
@@ -72,8 +99,6 @@ export default function DailyChecklist({ day, completions }: Props) {
                 {item.subject}
               </span>
             )}
-
-            {/* 🎯 THE OVERDUE BADGE */}
             {item.isOverdue && !isDone && (
               <span className="text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-tight bg-red-100 text-red-600 animate-pulse">
                 Overdue
@@ -98,7 +123,6 @@ export default function DailyChecklist({ day, completions }: Props) {
 
   return (
     <div className="space-y-10">
-      {/* 🚀 ACTIVE OBJECTIVES */}
       <section className="space-y-4">
         {activeItems.length > 0 ? (
           activeItems.map((item) => (
@@ -111,7 +135,6 @@ export default function DailyChecklist({ day, completions }: Props) {
         )}
       </section>
 
-      {/* 🏁 FINALIZED TODAY */}
       {finishedItems.length > 0 && (
         <section className="pt-6 border-t border-gray-100">
           <h3 className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em] mb-4 italic">

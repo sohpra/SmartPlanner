@@ -12,6 +12,7 @@
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.2",
+    "canvas-confetti": "^1.9.4",
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.8",
     "drizzle-orm": "^0.45.1",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
