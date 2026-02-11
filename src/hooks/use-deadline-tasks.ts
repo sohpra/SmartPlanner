@@ -7,9 +7,11 @@ export interface DeadlineTask {
   id: string;
   name: string;
   due_date: string;
+  scheduled_date: string | null; // 🎯 The Anchor
+  is_fixed: boolean;             // 🎯 The "Special Lesson" flag
   estimated_minutes: number;
   status: string;
-  subject: string | null; // This will now hold the string from the join
+  subject: string | null;
 }
 
 export function useDeadlineTasks() {
@@ -19,15 +21,14 @@ export function useDeadlineTasks() {
   async function fetchTasks() {
     setIsLoading(true);
     
-    // Get today's date in YYYY-MM-DD format
-    const today = new Date().toISOString().split('T')[0];
-
     const { data, error } = await supabase
       .from("deadline_tasks")
       .select(`
         id, 
         name, 
         due_date, 
+        scheduled_date,
+        is_fixed,
         estimated_minutes, 
         status, 
         subject_id,
@@ -47,7 +48,6 @@ export function useDeadlineTasks() {
     if (data) {
       const formattedTasks = data.map((t: any) => ({
         ...t,
-        // Handle the array-vs-object mismatch for TypeScript
         subject: Array.isArray(t.subjects) 
           ? t.subjects[0]?.name 
           : t.subjects?.name || "General"
@@ -55,13 +55,28 @@ export function useDeadlineTasks() {
       setTasks(formattedTasks);
     }
     setIsLoading(false);
-
   }
 
+  // 🎯 New: Function to update anchors or fixed status
+  async function updateTask(taskId: string, updates: Partial<DeadlineTask>) {
+    const { error } = await supabase
+      .from("deadline_tasks")
+      .update(updates)
+      .eq("id", taskId);
+
+    if (error) {
+      console.error("Update error:", error.message);
+      return { success: false };
+    }
+
+    // Optimistically update local state
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
+    return { success: true };
+  }
 
   useEffect(() => {
     fetchTasks();
   }, []);
 
-  return { tasks, isLoading, fetchTasks };
+  return { tasks, isLoading, fetchTasks, updateTask };
 }

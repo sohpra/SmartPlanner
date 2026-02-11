@@ -70,21 +70,55 @@ export function buildWeekPlan({
   });
 
 // 4. HOMEWORK (Earliest Best Fit + Stability shiled + N-1 Deadline Guard)
-  const homeworkItems: Record<string, any[]> = {};
-  const occupiedCap: Record<string, number> = {};
-  windowDates.forEach(d => {
-    homeworkItems[d] = [];
-    occupiedCap[d] = (weeklyItems[d] || []).reduce((sum: number, i: any) => sum + (i.minutes || 0), 0);
-  });
+// --- 4. HOMEWORK (Persistent Anchors + Fixed Date Support) ---
+const homeworkItems: Record<string, any[]> = {};
+const occupiedCap: Record<string, number> = {};
+windowDates.forEach(d => {
+  homeworkItems[d] = [];
+  occupiedCap[d] = (weeklyItems[d] || []).reduce((sum: number, i: any) => sum + (i.minutes || 0), 0);
+});
 
-  const sortedHw = [...(deadlines || [])].sort((a: any, b: any) => 
-    daysBetween(today, a.due_date) - daysBetween(today, b.due_date)
-  );
+// Sort by fixed status first, then by deadline
+const sortedHw = [...(deadlines || [])].sort((a: any, b: any) => {
+  if (a.is_fixed !== b.is_fixed) return a.is_fixed ? -1 : 1;
+  return daysBetween(today, a.due_date) - daysBetween(today, b.due_date);
+});
 
-  for (const task of sortedHw) {
-    const isDoneToday = todayCompletionKeys.has(`deadline_task:${task.id}`);
-    const isDoneHistory = historicalIds.has(task.id) || (task.status === 'completed' && !isDoneToday);
-    if (isDoneHistory) continue;
+for (const task of sortedHw) {
+  const isDoneToday = todayCompletionKeys.has(`deadline_task:${task.id}`);
+  const isDoneHistory = historicalIds.has(task.id) || (task.status === 'completed' && !isDoneToday);
+  if (isDoneHistory) continue;
+
+  // 🎯 THE STABILITY ANCHOR
+  let dbScheduledDate = task.scheduled_date ? String(task.scheduled_date).split('T')[0] : null;
+
+  const mapped = { 
+    id: task.id, 
+    name: task.name, 
+    minutes: task.estimated_minutes, 
+    dueDate: task.due_date,
+    isDone: isDoneToday,
+    subject: task.subject_name || task.subject || "",
+    type: 'deadline_task',
+    is_fixed: task.is_fixed,
+    scheduledDate: dbScheduledDate,
+    // Bonus logic: Done today but was meant for the future
+    isBonus: isDoneToday && dbScheduledDate && dbScheduledDate > today 
+  };
+
+  // --- CASE A: Task is already done today ---
+  if (isDoneToday) {
+    homeworkItems[today].push(mapped);
+    occupiedCap[today] += task.estimated_minutes;
+    continue; // Move to next task
+  }
+
+  // --- CASE B: Task has a Database Anchor (Fixed or Saved) ---
+  if (dbScheduledDate && homeworkItems[dbScheduledDate]) {
+    // 🎯 THE OVERACHIEVER LOGIC
+    // 1. It is ONLY a bonus if it's being completed TODAY 
+    //    and was scheduled for a FUTURE date.
+    const isBonus = isDoneToday && dbScheduledDate > today;
 
     const mapped = { 
       id: task.id, 
@@ -94,54 +128,64 @@ export function buildWeekPlan({
       isDone: isDoneToday,
       subject: task.subject_name || task.subject || "",
       type: 'deadline_task',
-      isBonus: false 
+      is_fixed: task.is_fixed,
+      scheduledDate: dbScheduledDate,
+      isBonus: isBonus // 👈 This is the trigger for the 4/3 math
     };
 
-    if (isDoneToday) {
+    // 2. If it's a bonus (done early), we physically move the item 
+    //    to TODAY's list so the user sees their progress.
+    if (isBonus) {
       homeworkItems[today].push(mapped);
       occupiedCap[today] += task.estimated_minutes;
-      continue;
+    } else {
+      // Otherwise, put it exactly where the DB says
+      homeworkItems[dbScheduledDate].push(mapped);
+      occupiedCap[dbScheduledDate] += task.estimated_minutes;
     }
+    
+    continue; // 🛑 Hard stop! Case B is handled.
+  }
 
-    // 🎯 THE "N-1" WINDOW
-    const dayBeforeDeadline = addDays(task.due_date, -1);
-    const possibleDays = windowDates.filter(date => date >= today && date <= dayBeforeDeadline);
-    let placedDate: string | null = null;
+  // --- CASE C: Simulation (Only runs for tasks with NO scheduled_date) ---
+  let placedDate: string | null = null;
+  const dayBeforeDeadline = addDays(task.due_date, -1);
+  const possibleDays = windowDates.filter(date => date >= today && date <= dayBeforeDeadline);
 
-    // PASS 1: Best Fit (The "Polite" Search)
+  // Pass 1: Polite Search (45m buffer)
+  for (const d of possibleDays) {
+    if (occupiedCap[d] + task.estimated_minutes + 45 <= baseCapMap[d]) {
+      placedDate = d;
+      break;
+    }
+  }
+
+  // Pass 2: Emergency Search (Strict)
+  if (!placedDate) {
     for (const d of possibleDays) {
-      const buffer = 45;
-      if (occupiedCap[d] + task.estimated_minutes + buffer <= baseCapMap[d]) {
+      if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
         placedDate = d;
         break;
       }
     }
-
-    // PASS 2: Emergency Fit (The "Strict" Search)
-    if (!placedDate) {
-      for (const d of possibleDays) {
-        if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
-          placedDate = d;
-          break;
-        }
-      }
-    }
-
-    // PASS 3: Guarantee (The "Last Minute" Force)
-    if (!placedDate) {
-      // If due tomorrow, it stays today. If due later, it forces onto day-before.
-      placedDate = possibleDays.length > 0 ? dayBeforeDeadline : today;
-    }
-
-    if (placedDate && homeworkItems[placedDate]) {
-      // Bonus logic based on the "Pass 1" ideal
-      const wouldFitTodayNormally = (occupiedCap[today] + task.estimated_minutes + 45 <= baseCapMap[today]);
-      mapped.isBonus = (placedDate === today && !wouldFitTodayNormally);
-      
-      homeworkItems[placedDate].push(mapped);
-      occupiedCap[placedDate] += task.estimated_minutes;
-    }
   }
+
+  // Pass 3: Force (Last Resort)
+  if (!placedDate) {
+    placedDate = possibleDays.length > 0 ? dayBeforeDeadline : today;
+  }
+
+  // Final Placement for simulated tasks
+  if (placedDate && homeworkItems[placedDate]) {
+    const wouldFitTodayNormally = (occupiedCap[today] + task.estimated_minutes + 45 <= baseCapMap[today]);
+    if (placedDate === today && !dbScheduledDate && !wouldFitTodayNormally) {
+        mapped.isBonus = true;
+    }
+
+    homeworkItems[placedDate].push(mapped);
+    occupiedCap[placedDate] += task.estimated_minutes;
+  }
+}
 
 // --- 5. REVISION (The Iron-Clad Unified Architect) ---
 const revisionItems: Record<string, any[]> = {};
