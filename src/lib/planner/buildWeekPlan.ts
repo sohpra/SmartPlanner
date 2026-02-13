@@ -289,6 +289,34 @@ windowDates.forEach(d => {
     );
 
     for (const project of sortedProjects) {
+
+      if (project.status === 'completed' && !todayCompletionKeys.has(`project:${project.id}`)) {
+      continue; 
+  }
+      // Add this right after the 'for (const project of sortedProjects)' loop starts
+      const isDoneToday = todayCompletionKeys.has(`project:${project.id}`);
+
+      // 🎯 SAFETY: If it's already done today, we MUST show it in the checklist
+      // even if there was technically no "spare" capacity (e.g. on a Rest Day)
+      if (isDoneToday && d === today) {
+        // Check if we've already added it via the allocator
+        const existing = projectItems[d].find(p => p.projectId === project.id);
+        if (!existing) {
+          projectItems[d].push({
+            id: project.id,
+            name: `Project: ${project.name}`,
+            subject: project.subject || "Project",
+            minutes: 60, // Default display for manual logs
+            isDone: true,
+            type: 'project',
+            projectId: project.id,
+            isBonus: true // It's a bonus because it wasn't planned by the allocator
+          });
+          // Still track the progress so the simulation stays accurate
+          projectProgress[project.id] += 60;
+          continue; // Move to next project
+        }
+      }
       // Stop if we hit the 120m daily ceiling OR run out of day capacity
       if (totalProjectMinutesAllocatedToday >= DAILY_PROJECT_CEILING) break;
       if (spareForProjects <= 15) break;
