@@ -69,8 +69,7 @@ export function buildWeekPlan({
       }));
   });
 
-// 4. HOMEWORK (Earliest Best Fit + Stability shiled + N-1 Deadline Guard)
-// --- 4. HOMEWORK (Persistent Anchors + Fixed Date Support) ---
+// 4. HOMEWORK 
 const homeworkItems: Record<string, any[]> = {};
 const occupiedCap: Record<string, number> = {};
 windowDates.forEach(d => {
@@ -195,7 +194,6 @@ for (const task of sortedHw) {
 }
 
 // --- 5. REVISION (The Iron-Clad Unified Architect) ---
-// --- 5. REVISION (The Iron-Clad Unified Architect) ---
 const revisionItems: Record<string, any[]> = {};
 windowDates.forEach(d => revisionItems[d] = []);
 
@@ -265,13 +263,84 @@ windowDates.forEach(d => {
   }
 });
 
-// 6. FINAL ASSEMBLY (Stable Progress Logic)
-// 6. FINAL ASSEMBLY (The "6/5" Overachiever Logic)
+
+// --- 6. PROJECTS (Lower Priority than Revision) ---
+const projectItems: Record<string, any[]> = {};
+windowDates.forEach(d => projectItems[d] = []);
+
+const projectProgress: Record<string, number> = {};
+(projects || []).forEach((p: any) => {
+  projectProgress[p.id] = p.completed_minutes || 0;
+});
+
+windowDates.forEach(d => {
+  const currentCapacity = baseCapMap[d];
+  const usedSoFar = occupiedCap[d] || 0;
+  let spareForProjects = currentCapacity - usedSoFar;
+
+  // 🎯 THE CEILING: Maximum time allowed for ALL projects today
+  let totalProjectMinutesAllocatedToday = 0;
+  const DAILY_PROJECT_CEILING = 120; 
+
+  if (spareForProjects > 15) {
+    // Sort by due date so we tackle the most urgent projects first
+    const sortedProjects = [...projects].sort((a: any, b: any) => 
+      daysBetween(d, a.due_date) - daysBetween(d, b.due_date)
+    );
+
+    for (const project of sortedProjects) {
+      // Stop if we hit the 120m daily ceiling OR run out of day capacity
+      if (totalProjectMinutesAllocatedToday >= DAILY_PROJECT_CEILING) break;
+      if (spareForProjects <= 15) break;
+
+      const daysLeft = daysBetween(d, project.due_date);
+      const remainingMinutes = project.estimated_minutes - projectProgress[project.id];
+
+      if (remainingMinutes > 0 && daysLeft >= 0) {
+        // 🎯 URGENCY LOGIC: 90m if due in 5 days, otherwise 60m
+        const maxSessionForThisProject = daysLeft <= 5 ? 90 : 60;
+
+        // 🎯 ALLOCATION: Take as much as possible up to the session cap and daily ceiling
+        const allocation = Math.min(
+          remainingMinutes,
+          spareForProjects,
+          maxSessionForThisProject,
+          (DAILY_PROJECT_CEILING - totalProjectMinutesAllocatedToday)
+        );
+
+        if (allocation >= 15) {
+          const isDoneToday = todayCompletionKeys.has(`project:${project.id}`);
+
+          projectItems[d].push({
+            id: project.id,
+            name: `Project: ${project.name}`,
+            subject: project.subject || "Project",
+            minutes: allocation,
+            isDone: isDoneToday && d === today,
+            type: 'project',
+            projectId: project.id,
+            isBonus: d === today && (baseCapMap[d] === 0 || spareForProjects < allocation)
+          });
+
+          // Update counters
+          spareForProjects -= allocation;
+          occupiedCap[d] += allocation;
+          totalProjectMinutesAllocatedToday += allocation;
+          projectProgress[project.id] += allocation;
+        }
+      }
+    }
+  }
+});
+
+// 7. FINAL ASSEMBLY 
+
 const days: DayPlan[] = windowDates.map((d: string) => {
   const wk = weeklyItems[d] || [];
   const hw = homeworkItems[d] || [];
   const rv = revisionItems[d] || [];
-  const allItems = [...wk, ...hw, ...rv];
+  const pj = projectItems[d] || []; 
+  const allItems = [...wk, ...hw, ...rv, ...pj];
   
   // 🎯 1. PLANNED MINUTES (The Target)
   // We exclude bonuses so the target doesn't move when you do extra work.
@@ -308,12 +377,15 @@ const days: DayPlan[] = windowDates.map((d: string) => {
       items: hw 
     },
     revision: { minutes: rv.reduce((s, i) => s + (i.minutes || 0), 0), items: rv },
-    projects: { minutes: 0, items: [] },
+    projects: { 
+      minutes: pj.reduce((s, i) => s + (i.minutes || 0), 0), 
+      items: pj 
+    }, 
     
     totalPlanned: dayTotalPlannedMinutes, 
     totalCompleted: dayTotalDoneMinutes,
-    plannedTaskCount: plannedCount,   // This becomes the '5'
-    completedTaskCount: completedCount, // This becomes the '6'
+    plannedTaskCount: plannedCount,   
+    completedTaskCount: completedCount, 
     spare: Math.max(0, baseCapMap[d] - dayTotalPlannedMinutes)
   };
 });

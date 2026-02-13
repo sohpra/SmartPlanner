@@ -74,6 +74,16 @@ export default function PlannerPage() {
     revisionSlots, revisionLoading
   ]);
 
+  const activeProjects = useMemo(() => {
+  return (projects || []).filter((p: any) => p.status === 'active');
+}, [projects]);
+
+const futureRevision = useMemo(() => {
+  return (revisionSlots || [])
+    .filter((slot: any) => slot.date > today && !slot.is_completed)
+    .sort((a: any, b: any) => a.date.localeCompare(b.date));
+}, [revisionSlots, today]);
+
   // 🎯 DEFINE TRUTH CONSTANTS (Must be before useEffects that use them)
   const todayPlan = activePlan?.days[0];
   const tomorrowPlan = activePlan?.days[1];
@@ -326,8 +336,13 @@ export default function PlannerPage() {
                 <section className="bg-white p-1 rounded-[2.1rem] ring-4 ring-blue-600/10 border border-blue-600/20">
                   <div className="bg-white p-6 rounded-[2rem]">
                     <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-6 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-600" />Priority Checklist</h3>
-                    <DailyChecklist day={todayPlan} completions={checklistCompletions} />
-                  </div>
+                      <DailyChecklist 
+                        day={todayPlan} 
+                        completions={checklistCompletions} 
+                        allProjects={activeProjects}    // 👈 Pass the active projects
+                        upcomingRevision={futureRevision} // 👈 Pass the future revision slots
+                      />                  
+                    </div>
                 </section>
               </div>
             )}
