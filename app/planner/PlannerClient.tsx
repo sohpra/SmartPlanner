@@ -36,14 +36,8 @@ export default function PlannerPage() {
   const [view, setView] = useState<"daily" | "weekly" | "monthly">("daily");
   const lastCelebratedCount = useRef(0);
 
-  // 🎯 1. LIVE STATS STATE
+  // 🎯 LIVE STATS STATE
   const [stats, setStats] = useState<{ current_streak: number; elite_count: number } | null>(null);
-
-  useEffect(() => {
-    if (urlView === "weekly") setView("weekly");
-    else if (urlView === "monthly") setView("monthly");
-    else setView("daily");
-  }, [urlView]);
 
   const exams = useExams();
   const { projects = [], isLoading: projectsLoading } = useProjects();
@@ -80,7 +74,20 @@ export default function PlannerPage() {
     revisionSlots, revisionLoading
   ]);
 
-  // 🎯 2. FETCH LIVE STATS FROM DB
+  // 🎯 DEFINE TRUTH CONSTANTS (Must be before useEffects that use them)
+  const todayPlan = activePlan?.days[0];
+  const tomorrowPlan = activePlan?.days[1];
+  const isSecured = todayPlan ? todayPlan.completedTaskCount >= todayPlan.plannedTaskCount : false;
+  const isElite = todayPlan ? todayPlan.completedTaskCount > todayPlan.plannedTaskCount : false;
+  const hasTasks = todayPlan ? todayPlan.plannedTaskCount > 0 : false;
+
+  useEffect(() => {
+    if (urlView === "weekly") setView("weekly");
+    else if (urlView === "monthly") setView("monthly");
+    else setView("daily");
+  }, [urlView]);
+
+  // FETCH LIVE STATS FROM DB
   useEffect(() => {
     const fetchStats = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -100,41 +107,47 @@ export default function PlannerPage() {
 
   // Auto sync count 
   useEffect(() => {
-    if (!activePlan?.days[0]) return;
-    
-    const todayPlan = activePlan.days[0];
-    const isSecured = todayPlan.completedTaskCount >= todayPlan.plannedTaskCount;
-    const isElite = todayPlan.completedTaskCount > todayPlan.plannedTaskCount;
-    
-    // 🔥 FIX: Allow sync if tasks are completed, even if planned was 0
-    const shouldSync = todayPlan.plannedTaskCount > 0 || todayPlan.completedTaskCount > 0;
+  // 🎯 1. THE GATEKEEPER: If the plan isn't ready, do nothing.
+  if (!todayPlan) return;
+  
+  const syncStats = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    if (shouldSync) {
-      const syncStats = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+      // 2. Update the daily record
+      await supabase.rpc('sync_daily_stats', {
+        target_user_id: user.id,
+        is_mission_secured: isSecured, 
+        is_elite_day: isElite,
+        planned_count: todayPlan.plannedTaskCount,    
+        completed_count: todayPlan.completedTaskCount 
+      });
 
-        await supabase.rpc('sync_daily_stats', {
-          target_user_id: user.id,
-          is_mission_secured: isSecured,
-          is_elite_day: isElite,
-          planned_count: todayPlan.plannedTaskCount,    
-          completed_count: todayPlan.completedTaskCount 
-        });
-      };
-      
-      syncStats();
+      // 3. Re-fetch stats to flip 6 -> 7
+      const { data: newStats } = await supabase
+        .from('planner_stats')
+        .select('current_streak, elite_count')
+        .eq('user_id', user.id)
+        .single();
+
+      if (newStats) setStats(newStats);
+    } catch (err) {
+      console.error("Sync Error:", err);
     }
-  }, [activePlan?.days[0]?.completedTaskCount, activePlan?.days[0]?.plannedTaskCount]);
+  };
+  
+  syncStats();
+
+  // 🎯 4. THE DEPENDENCY FIX:
+  // Use optional chaining here so TS knows these might be undefined initially
+}, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, isElite]);
 
   // 🎉 Confetti Celebration Logic
   useEffect(() => {
-    if (!activePlan?.days[0]) return;
-    const todayPlan = activePlan.days[0];
-    const isFinished = todayPlan.completedTaskCount >= todayPlan.plannedTaskCount;
-    const hasTasks = todayPlan.plannedTaskCount > 0;
+    if (!todayPlan) return;
     
-    if (isFinished && hasTasks && todayPlan.completedTaskCount > lastCelebratedCount.current) {
+    if (isSecured && hasTasks && todayPlan.completedTaskCount > lastCelebratedCount.current) {
       confetti({
         particleCount: 150,
         spread: 70,
@@ -143,9 +156,9 @@ export default function PlannerPage() {
       });
     }
     lastCelebratedCount.current = todayPlan.completedTaskCount;
-  }, [activePlan?.days[0]?.completedTaskCount, activePlan?.days[0]?.plannedTaskCount]);
+  }, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, hasTasks]);
   
-  if (!activePlan) {
+  if (!activePlan || !todayPlan) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -156,16 +169,10 @@ export default function PlannerPage() {
     );
   }
 
-  const todayPlan = activePlan.days[0];
-  const tomorrowPlan = activePlan.days[1];
-
-// 🎯 UPDATE THIS in PlannerClient.tsx (around line 290)
   const checklistCompletions = {
     completed: completions.completed,
     toggle: completions.toggleDeadlineTask,
     dateKey: completions.dateKey,
-    
-    // ✅ Send the static counts to satisfy the new interface
     plannedTaskCount: todayPlan.plannedTaskCount,
     totalPlannedMinutes: todayPlan.totalPlanned,
   };
@@ -219,28 +226,23 @@ export default function PlannerPage() {
                     <div className="flex items-center gap-1 bg-gray-100/80 p-1 rounded-2xl border border-gray-200/50">
                       <div className="group relative">
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all ${
-                          todayPlan.completedTaskCount >= todayPlan.plannedTaskCount && todayPlan.plannedTaskCount > 0 
-                          ? 'bg-emerald-500 shadow-sm' 
-                          : 'bg-gray-300/50'
+                          isSecured ? 'bg-emerald-500 shadow-sm' : 'bg-gray-300/50'
                         }`}>
-                          <ShieldCheck className={`w-4 h-4 ${todayPlan.completedTaskCount >= todayPlan.plannedTaskCount ? 'text-white' : 'text-gray-400'}`} />
+                          <ShieldCheck className={`w-4 h-4 ${isSecured ? 'text-white' : 'text-gray-400'}`} />
                         </div>
-                        <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-1 rounded whitespace-nowrap z-50">Mission Secured</div>
+                        <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-1 rounded whitespace-nowrap z-50">
+                          {hasTasks ? 'Mission Secured' : 'Rest Day Secured'}
+                        </div>
                       </div>
 
-                      {/* 🎯 ELITE BADGE - Updated for Rest Day Support */}
                       <div className="group relative">
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all duration-500 ${
-                          todayPlan.completedTaskCount > todayPlan.plannedTaskCount 
-                          ? 'bg-purple-600 shadow-lg shadow-purple-200' 
-                          : 'bg-gray-300/50 opacity-40'
+                          isElite ? 'bg-purple-600 shadow-lg shadow-purple-200' : 'bg-gray-300/50 opacity-40'
                         }`}>
-                          <Target className={`w-4 h-4 ${
-                            todayPlan.completedTaskCount > todayPlan.plannedTaskCount ? 'text-white' : 'text-gray-400'
-                          }`} />
+                          <Target className={`w-4 h-4 ${isElite ? 'text-white' : 'text-gray-400'}`} />
                         </div>
                         <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-1 rounded whitespace-nowrap z-50 italic">
-                          {todayPlan.completedTaskCount > todayPlan.plannedTaskCount ? 'Elite Performance' : 'Elite Status Locked'}
+                          {isElite ? 'Elite Performance' : 'Elite Status Locked'}
                         </div>
                       </div>
                     </div>
@@ -257,25 +259,24 @@ export default function PlannerPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* CARD 1: MISSION STATUS (CAPPED) */}
                   <div className={`p-6 bg-white rounded-3xl border transition-all duration-500 relative overflow-hidden group ${
-                    todayPlan.completedTaskCount >= todayPlan.plannedTaskCount && todayPlan.plannedTaskCount > 0
-                      ? 'border-emerald-200 bg-emerald-50/30'
-                      : 'border-gray-100 shadow-sm'
+                    isSecured ? 'border-emerald-200 bg-emerald-50/30' : 'border-gray-100 shadow-sm'
                   }`}>
                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 italic">Current Mission Status</p>
                     <div className="flex items-center justify-between relative z-10">
                       <div className="flex items-baseline gap-1">
-                        <p className={`text-5xl font-black transition-colors duration-500 ${todayPlan.completedTaskCount >= todayPlan.plannedTaskCount ? 'text-emerald-600' : 'text-slate-900'}`}>
+                        <p className={`text-5xl font-black transition-colors duration-500 ${isSecured ? 'text-emerald-600' : 'text-slate-900'}`}>
                           {todayPlan.completedTaskCount}
                         </p>
                         <p className="text-xl font-bold text-slate-300 italic">/ {todayPlan.plannedTaskCount}</p>
                       </div>
                       <div className="text-right flex flex-col items-end gap-1">
-                        {todayPlan.completedTaskCount >= todayPlan.plannedTaskCount && todayPlan.plannedTaskCount > 0 ? (
+                        {isSecured ? (
                           <div className="flex flex-col items-end animate-in fade-in duration-700">
                             <div className="h-7 w-7 rounded-full bg-emerald-100 flex items-center justify-center mb-1"><ShieldCheck className="w-4 h-4 text-emerald-600" /></div>
-                            <p className="text-[9px] font-black text-emerald-600 uppercase italic">Mission Secured</p>
+                            <p className="text-[9px] font-black text-emerald-600 uppercase italic">
+                                {hasTasks ? 'Mission Secured' : 'Rest Secured'}
+                            </p>
                           </div>
                         ) : (
                           <div className="flex flex-col items-end opacity-60">
@@ -287,7 +288,6 @@ export default function PlannerPage() {
                     </div>
                   </div>
 
-                  {/* CARD 2: OUTPUT EFFICIENCY (CAPPED) */}
                   <div className={`p-6 bg-white rounded-3xl border transition-all duration-500 ${
                     todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'border-emerald-100 bg-emerald-50/10' : 'border-gray-100 shadow-sm'
                   }`}>
@@ -307,7 +307,7 @@ export default function PlannerPage() {
                           />
                         </div>
                         <div className="flex justify-between items-center">
-                          {todayPlan.totalCompleted >= todayPlan.totalPlanned && todayPlan.plannedTaskCount > 0 ? (
+                          {todayPlan.totalCompleted >= todayPlan.totalPlanned && hasTasks ? (
                             <p className="text-[10px] font-black uppercase italic text-emerald-600">Peak Performance</p>
                           ) : (
                             <p className="text-[10px] font-black uppercase italic text-slate-500">On the way</p>
@@ -336,7 +336,7 @@ export default function PlannerPage() {
             {view === "monthly" && <div className="animate-in fade-in zoom-in-95 duration-300"><MonthView plan={activePlan} exams={exams.upcoming || []} projects={projects || []} /></div>}    
           </div>
 
-          {view === "daily" && (
+          {view === "daily" && tomorrowPlan && (
             <aside className="lg:col-span-4 space-y-6 animate-in fade-in lg:slide-in-from-right-4 duration-500">
               <TomorrowChecklist day={tomorrowPlan} />
               <ComingUp projects={projects || []} exams={exams.upcoming || []} />
