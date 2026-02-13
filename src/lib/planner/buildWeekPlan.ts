@@ -92,6 +92,8 @@ for (const task of sortedHw) {
   // 🎯 THE STABILITY ANCHOR
   let dbScheduledDate = task.scheduled_date ? String(task.scheduled_date).split('T')[0] : null;
 
+  const isCurrentlyDoneBonus = isDoneToday && (!dbScheduledDate || dbScheduledDate > today);
+
   const mapped = { 
     id: task.id, 
     name: task.name, 
@@ -103,7 +105,7 @@ for (const task of sortedHw) {
     is_fixed: task.is_fixed,
     scheduledDate: dbScheduledDate,
     // Bonus logic: Done today but was meant for the future
-    isBonus: isDoneToday && dbScheduledDate && dbScheduledDate > today 
+    isBonus: isCurrentlyDoneBonus // previously >>> isDoneToday && dbScheduledDate && dbScheduledDate > today 
   };
 
   // --- CASE A: Task is already done today ---
@@ -115,9 +117,7 @@ for (const task of sortedHw) {
 
   // --- CASE B: Task has a Database Anchor (Fixed or Saved) ---
   if (dbScheduledDate && homeworkItems[dbScheduledDate]) {
-    // 🎯 THE OVERACHIEVER LOGIC
-    // 1. It is ONLY a bonus if it's being completed TODAY 
-    //    and was scheduled for a FUTURE date.
+    // 🎯 THE OVERACHIEVER LOGIC: A bonus is something done TODAY that was meant for the FUTURE
     const isBonus = isDoneToday && dbScheduledDate > today;
 
     const mapped = { 
@@ -130,22 +130,24 @@ for (const task of sortedHw) {
       type: 'deadline_task',
       is_fixed: task.is_fixed,
       scheduledDate: dbScheduledDate,
-      isBonus: isBonus // 👈 This is the trigger for the 4/3 math
+      isBonus: isBonus // 🚀 This is the critical flag for the X/0 calculation
     };
 
-    // 2. If it's a bonus (done early), we physically move the item 
-    //    to TODAY's list so the user sees their progress.
+    // If it's a bonus, we move it to Today's view, but because isBonus is true, 
+    // it won't be counted in Today's 'plannedTaskCount'.
     if (isBonus) {
       homeworkItems[today].push(mapped);
       occupiedCap[today] += task.estimated_minutes;
     } else {
-      // Otherwise, put it exactly where the DB says
+      // If it's not a bonus, keep it on its scheduled date (Today or Future)
       homeworkItems[dbScheduledDate].push(mapped);
-      occupiedCap[dbScheduledDate] += task.estimated_minutes;
+      occupiedCap[dbScheduledDate] += (task.estimated_minutes || 0);
     }
     
-    continue; // 🛑 Hard stop! Case B is handled.
+    continue; // Move to next task
   }
+    
+  
 
   // --- CASE C: Simulation (Only runs for tasks with NO scheduled_date) ---
   let placedDate: string | null = null;
@@ -177,12 +179,17 @@ for (const task of sortedHw) {
 
   // Final Placement for simulated tasks
   if (placedDate && homeworkItems[placedDate]) {
+    // 🎯 If it lands on today via simulation, it's a bonus ONLY if it's over capacity
+    // or if capacity is 0 (Rest Day)
     const wouldFitTodayNormally = (occupiedCap[today] + task.estimated_minutes + 45 <= baseCapMap[today]);
-    if (placedDate === today && !dbScheduledDate && !wouldFitTodayNormally) {
-        mapped.isBonus = true;
-    }
+    
+    // Apply the bonus flag to the object we are about to push
+    const finalMapped = {
+      ...mapped,
+      isBonus: mapped.isBonus || (placedDate === today && !dbScheduledDate && !wouldFitTodayNormally)
+    };
 
-    homeworkItems[placedDate].push(mapped);
+    homeworkItems[placedDate].push(finalMapped);
     occupiedCap[placedDate] += task.estimated_minutes;
   }
 }
@@ -277,12 +284,19 @@ const days: DayPlan[] = windowDates.map((d: string) => {
     .filter(i => i.isDone)
     .reduce((sum, i) => sum + (i.minutes || 0), 0);
 
-  // 🎯 3. TASK COUNTS (The "6/5" Logic)
-  // completedCount: Counts EVERY item that is done.
+  // 🎯 3. TASK COUNTS (The "Stability" Fix)
+  // Completed is easy: count everything checked.
   const completedCount = allItems.filter(i => i.isDone).length;
-  
-  // plannedCount: Only counts items that were meant for today.
-  const plannedCount = allItems.filter(i => !i.isBonus).length;
+
+  // Planned must be: 
+  // (Items meant for today that aren't done) + (Items meant for today that ARE done)
+  const plannedCount = allItems.filter(i => {
+    // If it's a bonus, it was NEVER planned for today.
+    if (i.isBonus) return false;
+    
+    // If it's scheduled for today (or simulated for today), it IS planned.
+    return true; 
+  }).length;
 
   return {
     date: d,

@@ -105,14 +105,15 @@ export default function PlannerPage() {
     const todayPlan = activePlan.days[0];
     const isSecured = todayPlan.completedTaskCount >= todayPlan.plannedTaskCount;
     const isElite = todayPlan.completedTaskCount > todayPlan.plannedTaskCount;
-    const hasTasks = todayPlan.plannedTaskCount > 0;
+    
+    // 🔥 FIX: Allow sync if tasks are completed, even if planned was 0
+    const shouldSync = todayPlan.plannedTaskCount > 0 || todayPlan.completedTaskCount > 0;
 
-    if (hasTasks) {
+    if (shouldSync) {
       const syncStats = async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // 🎯 AUTO-SYNC: Whenever the count changes, update the DB stats
         await supabase.rpc('sync_daily_stats', {
           target_user_id: user.id,
           is_mission_secured: isSecured,
@@ -227,10 +228,10 @@ export default function PlannerPage() {
                         <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-1 rounded whitespace-nowrap z-50">Mission Secured</div>
                       </div>
 
-                      {/* 🎯 ELITE BADGE - Now Dynamic */}
+                      {/* 🎯 ELITE BADGE - Updated for Rest Day Support */}
                       <div className="group relative">
                         <div className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all duration-500 ${
-                          todayPlan.completedTaskCount > todayPlan.plannedTaskCount && todayPlan.plannedTaskCount > 0 
+                          todayPlan.completedTaskCount > todayPlan.plannedTaskCount 
                           ? 'bg-purple-600 shadow-lg shadow-purple-200' 
                           : 'bg-gray-300/50 opacity-40'
                         }`}>
