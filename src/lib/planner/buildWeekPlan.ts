@@ -210,8 +210,19 @@ const pendingSlots = allSlots.filter(s => !isSlotDone(s));
 
 // --- STEP 1: Process Done Items (Pin to Today) ---
 doneSlots.forEach(s => {
+  // --- STEP 1: Process Done Items (Pin to Today) ---
+doneSlots.forEach(s => {
   if (revisionItems[today]) {
     const mins = s.duration_minutes || s.slotMinutes || 30;
+    
+    // 🎯 THE FIX: Normalize the date strings before comparing
+    // This ensures '2026-02-16T10:00:00' correctly matches '2026-02-16'
+    const scheduledDate = s.date ? String(s.date).split('T')[0] : null;
+    
+    // It is ONLY a bonus if it was pulled forward from the FUTURE.
+    // If it was meant for today, isBonus MUST be false to keep the denominator stable.
+    const isBonus = scheduledDate !== null && scheduledDate > today;
+
     revisionItems[today].push({ 
       ...s, 
       id: s.id,
@@ -220,10 +231,15 @@ doneSlots.forEach(s => {
       type: 'revision', 
       isDone: true, 
       minutes: mins,
-      isBonus: s.date > today // Typically, revision isn't a "bonus" in the same way HW is
+      isBonus: isBonus // 🚀 This preserves the denominator for today's tasks
     });
-    occupiedCap[today] += mins;
+    
+    // Only count toward capacity if it wasn't a bonus (to avoid double-filling slots)
+    if (!isBonus) {
+      occupiedCap[today] += mins;
+    }
   }
+});
 });
 
 // --- STEP 2: Place Pending Slots (Strict DB Obedience) ---
@@ -288,56 +304,40 @@ windowDates.forEach(d => {
       daysBetween(d, a.due_date) - daysBetween(d, b.due_date)
     );
 
+    // Inside windowDates.forEach(d => { ... }) loop for Projects
     for (const project of sortedProjects) {
-
-      if (project.status === 'completed' && !todayCompletionKeys.has(`project:${project.id}`)) {
-      continue; 
-  }
-      // Add this right after the 'for (const project of sortedProjects)' loop starts
       const isDoneToday = todayCompletionKeys.has(`project:${project.id}`);
-
-      // 🎯 SAFETY: If it's already done today, we MUST show it in the checklist
-      // even if there was technically no "spare" capacity (e.g. on a Rest Day)
-      if (isDoneToday && d === today) {
-        // Check if we've already added it via the allocator
-        const existing = projectItems[d].find(p => p.projectId === project.id);
-        if (!existing) {
-          projectItems[d].push({
-            id: project.id,
-            name: `Project: ${project.name}`,
-            subject: project.subject || "Project",
-            minutes: 60, // Default display for manual logs
-            isDone: true,
-            type: 'project',
-            projectId: project.id,
-            isBonus: true // It's a bonus because it wasn't planned by the allocator
-          });
-          // Still track the progress so the simulation stays accurate
-          projectProgress[project.id] += 60;
-          continue; // Move to next project
-        }
-      }
-      // Stop if we hit the 120m daily ceiling OR run out of day capacity
-      if (totalProjectMinutesAllocatedToday >= DAILY_PROJECT_CEILING) break;
-      if (spareForProjects <= 15) break;
-
-      const daysLeft = daysBetween(d, project.due_date);
+      
+      // 1. Calculate remaining work
       const remainingMinutes = project.estimated_minutes - projectProgress[project.id];
+      const daysLeft = daysBetween(d, project.due_date);
 
-      if (remainingMinutes > 0 && daysLeft >= 0) {
-        // 🎯 URGENCY LOGIC: 90m if due in 5 days, otherwise 60m
-        const maxSessionForThisProject = daysLeft <= 5 ? 90 : 60;
+      // 🎯 THE STABILITY FIX:
+      // If we did it today, we MUST treat it as "Planned" for today 
+      // so the denominator doesn't shrink.
+      const wasPlannedForToday = (d === today && isDoneToday) || (remainingMinutes > 0 && daysLeft >= 0);
 
-        // 🎯 ALLOCATION: Take as much as possible up to the session cap and daily ceiling
-        const allocation = Math.min(
-          remainingMinutes,
-          spareForProjects,
-          maxSessionForThisProject,
-          (DAILY_PROJECT_CEILING - totalProjectMinutesAllocatedToday)
-        );
+      if (wasPlannedForToday) {
+        const maxSession = daysLeft <= 5 ? 90 : 60;
+        
+        // Determine allocation
+        let allocation = 0;
+        if (isDoneToday && d === today) {
+          // If it's done, we use 60 (or the actual logged mins) to fill the slot
+          allocation = 60; 
+        } else {
+          allocation = Math.min(
+            remainingMinutes,
+            spareForProjects,
+            maxSession,
+            (DAILY_PROJECT_CEILING - totalProjectMinutesAllocatedToday)
+          );
+        }
 
-        if (allocation >= 15) {
-          const isDoneToday = todayCompletionKeys.has(`project:${project.id}`);
+        if (allocation >= 15 || (isDoneToday && d === today)) {
+          // 🎯 THE KEY: If the day has capacity > 0, it's NOT a bonus.
+          // This keeps it in the denominator.
+          const isBonus = d === today && baseCapMap[d] === 0;
 
           projectItems[d].push({
             id: project.id,
@@ -347,19 +347,22 @@ windowDates.forEach(d => {
             isDone: isDoneToday && d === today,
             type: 'project',
             projectId: project.id,
-            isBonus: d === today && (baseCapMap[d] === 0 || spareForProjects < allocation)
+            isBonus: isBonus 
           });
 
-          // Update counters
-          spareForProjects -= allocation;
-          occupiedCap[d] += allocation;
-          totalProjectMinutesAllocatedToday += allocation;
+          // Only subtract from spare/ceiling if it wasn't a bonus
+          if (!isBonus) {
+            spareForProjects -= allocation;
+            totalProjectMinutesAllocatedToday += allocation;
+            occupiedCap[d] += allocation;
+          }
+          
           projectProgress[project.id] += allocation;
         }
       }
     }
-  }
-});
+        }
+      });
 
 // 7. FINAL ASSEMBLY 
 
