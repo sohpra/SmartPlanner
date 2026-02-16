@@ -75,8 +75,16 @@ export async function syncRevisionSlots() {
       return daysBetween(today, a.due_date) - daysBetween(today, b.due_date);
     });
 
+    // 🎯 SHIELD LOGIC: Determine if we should start placement from Tomorrow
+    // Check if there are slots today and if they are all finished
+    const allTodayDone = slotsToday.length > 0 && slotsToday.every(s => s.is_completed);
+    const missionAlreadySecured = hasAnySlotsToday && allTodayDone;
+    
+    // If mission is secured, search starts from Tomorrow to protect Today's 'Secured' status
+    const searchStartDate = missionAlreadySecured ? tomorrow : today;
+
     for (const task of sortedHw) {
-      // 🎯 If task is completed TODAY, we must count its weight against today's budget
+      // 1. Handle Completed Tasks (Credit their weight to avoid "Time Refunding")
       if (task.status === 'completed') {
         const taskDate = task.scheduled_date?.split('T')[0];
         if (taskDate === today) occupiedByHw[today] += (task.estimated_minutes || 30);
@@ -86,21 +94,32 @@ export async function syncRevisionSlots() {
       let placedDate: string | null = null;
       const taskMins = task.estimated_minutes || 30;
 
+      // 2. Handle Fixed/Anchored Tasks
       if (task.scheduled_date) {
         const preferredDate = task.scheduled_date.split('T')[0];
+        // Only anchor to Today if it was already fixed or preferred there
         if (task.is_fixed || preferredDate === today) {
           if (occupiedByHw[preferredDate] !== undefined) placedDate = preferredDate;
         }
       }
 
+      // 3. Simulation for Floating Tasks
       if (!placedDate) {
         const dayBeforeDeadline = addDays(task.due_date, -1);
-        const possibleDays = windowDates.filter(date => date >= today && date <= dayBeforeDeadline);
+        
+        // 🎯 THE FIX: Filter possible days to start from searchStartDate
+        const possibleDays = windowDates.filter(date => 
+          date >= searchStartDate && date <= dayBeforeDeadline
+        );
+
+        // Pass A: Polite Search (45m buffer)
         for (const d of possibleDays) {
           if (occupiedByRocks[d] + occupiedByHw[d] + taskMins + 45 <= engineCapacityMap[d]) {
             placedDate = d; break;
           }
         }
+        
+        // Pass B: Emergency Search (Strict capacity)
         if (!placedDate) {
           for (const d of possibleDays) {
             if (occupiedByRocks[d] + occupiedByHw[d] + taskMins <= engineCapacityMap[d]) {
@@ -108,15 +127,24 @@ export async function syncRevisionSlots() {
             }
           }
         }
-        if (!placedDate) placedDate = possibleDays.length > 0 ? dayBeforeDeadline : today;
+
+        // Pass C: The Shielded Last Resort
+        if (!placedDate) {
+          // If due after searchStartDate, push to searchStartDate (usually Tomorrow)
+          // Otherwise, if it's literally due Today, we have no choice but Today.
+          placedDate = (dayBeforeDeadline >= searchStartDate) ? searchStartDate : today;
+        }
       }
 
+      // 4. Record Updates & Update Capacity Ledger
       const currentDbDate = task.scheduled_date ? task.scheduled_date.split('T')[0] : null;
       if (placedDate && placedDate !== currentDbDate) {
         tasksToUpdate.push({ id: task.id, scheduled_date: placedDate });
       }
       if (placedDate) occupiedByHw[placedDate] += taskMins;
     }
+
+    
 
     // 5. UPDATE DB & PREP REVISION GAPS
     windowDates.forEach(d => {
@@ -129,7 +157,8 @@ export async function syncRevisionSlots() {
       ));
     }
 
-    // 6. THE IRON SHIELD EVALUATION
+
+    // --- 6. THE IRON SHIELD EVALUATION ---
     const virtualPlanFull = planRevisionSlots(exams, {
       startDate: today,
       numDays: 60,
@@ -142,22 +171,27 @@ export async function syncRevisionSlots() {
     const isCrisisMode = totalMinsNeeded > futureCapacity;
 
     const totalTodayBudget = dateOverrides[today] ?? weeklyPattern[new Date(today).getDay()] ?? 150;
-    
+
+    // 🎯 NEW: MISSION SECURED CHECK
+    // Check if there were slots planned for today and if they are all finished.
+    const plannedTodayCount = slotsToday.length;
+    const completedTodayCount = slotsToday.filter(s => s.is_completed).length;
+    //const missionAlreadySecured = plannedTodayCount > 0 && completedTodayCount >= plannedTodayCount;
+
     // 🛡️ SHIELD RULES:
-    // 1. If we have used ANY revision slots (even done ones)
-    // 2. OR if we have less than 90m total capacity left
-    // 3. OR if we've used > 25% of the day (1 - 0.75)
     const hasLittleCapacityLeft = engineCapacityMap[today] < 90;
     const isDayStarted = engineCapacityMap[today] < (totalTodayBudget * 0.75);
-    
+
     let syncFromDate = today;
+
     if (!isCrisisMode) {
-      if (hasAnySlotsToday || hasLittleCapacityLeft || isDayStarted) {
+      // 🚀 Added 'missionAlreadySecured' to the protection logic
+      if (hasAnySlotsToday || hasLittleCapacityLeft || isDayStarted || missionAlreadySecured) {
         syncFromDate = tomorrow;
       }
     }
 
-    console.log(`🛡️ Final Decision: ${syncFromDate} | Remaining: ${engineCapacityMap[today]}/${totalTodayBudget}`);
+    console.log(`🛡️ Final Decision: ${syncFromDate} | Mission Secured: ${missionAlreadySecured}`);
 
     // 7. ATOMIC DB SYNC
     await supabase.from("revision_slots")

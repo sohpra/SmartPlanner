@@ -61,35 +61,66 @@ export default function DailyChecklist({ day, completions, allProjects = [], upc
     if (!error) window.location.reload(); // Refresh to let buildWeekPlan find it
   };
 
-  const TaskRow = ({ item, isDone }: { item: any, isDone: boolean }) => (
-    <div className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
-      isDone ? "opacity-50 bg-gray-50 border-gray-100 italic" : "bg-white border-gray-200 shadow-sm"
+const TaskRow = ({ item, isDone }: { item: any, isDone: boolean }) => (
+    <div className={`flex items-center justify-between p-4 rounded-[1.25rem] border transition-all duration-300 ${
+      isDone 
+        ? "opacity-50 bg-gray-50 border-gray-100 italic" 
+        : "bg-white border-gray-200 shadow-sm hover:border-blue-200"
     }`}>
       <div className="flex items-center gap-4">
         <input 
           type="checkbox" 
           checked={isDone} 
           onChange={() => handleToggle(item)} 
-          className="h-5 w-5 rounded border-gray-300 text-blue-600 accent-blue-600 cursor-pointer" 
+          className="h-5 w-5 rounded-lg border-gray-300 text-blue-600 accent-blue-600 cursor-pointer transition-transform active:scale-90" 
         />
         <div>
-          <div className="flex items-center gap-2 mb-0.5">
-            <p className={`text-sm font-bold ${isDone ? "line-through text-gray-400" : "text-gray-800"}`}>
+          <div className="flex flex-wrap items-center gap-2 mb-0.5">
+            <p className={`text-sm font-bold tracking-tight ${isDone ? "line-through text-gray-400" : "text-gray-800"}`}>
               {item.name}
             </p>
+            
+            {/* 🎯 BONUS BADGE: Clarifies why denominator didn't move */}
+            {item.isBonus && (
+              <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-600 uppercase italic tracking-tighter">
+                Bonus +1
+              </span>
+            )}
+
+            {/* 🎯 OVERDUE BADGE */}
+            {item.isOverdue && !isDone && (
+              <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md bg-red-100 text-red-600 uppercase animate-pulse">
+                Overdue
+              </span>
+            )}
+
             {item.subject && (
-              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-tight ${
+              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-tight ${
                 isDone ? "bg-gray-100 text-gray-400" : "bg-blue-50 text-blue-600"
               }`}>
                 {item.subject}
               </span>
             )}
           </div>
-          <p className="text-[10px] font-bold text-gray-400">
-            {item.minutes} mins • <span className="lowercase">{item.section}</span>
-          </p>
+          
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400">
+            <Clock className="w-3 h-3" />
+            <span>{item.minutes} mins</span>
+            <span className="text-gray-200">•</span>
+            <span className="lowercase font-medium">{item.section}</span>
+          </div>
         </div>
       </div>
+
+      {/* 🎯 DEADLINE INDICATOR */}
+      {item.dueDate && !isDone && (
+        <div className="text-right hidden sm:block">
+          <p className="text-[8px] font-black text-gray-300 uppercase tracking-widest mb-0.5">Deadline</p>
+          <p className={`text-[10px] font-black italic ${item.isOverdue ? "text-red-400" : "text-slate-500"}`}>
+            {new Date(item.dueDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+          </p>
+        </div>
+      )}
     </div>
   );
 
