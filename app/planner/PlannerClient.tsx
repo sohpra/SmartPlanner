@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
-import { Rocket, ShieldCheck, Target, Calendar } from "lucide-react";
+import { Rocket, ShieldCheck, Target, Calendar, Trophy, Clock } from "lucide-react";
 import confetti from 'canvas-confetti';
 import { supabase } from "@/lib/supabase/client";
 
@@ -37,7 +37,11 @@ export default function PlannerPage() {
   const lastCelebratedCount = useRef(0);
 
   // 🎯 LIVE STATS STATE
-  const [stats, setStats] = useState<{ current_streak: number; elite_count: number } | null>(null);
+  const [stats, setStats] = useState<{ 
+    current_streak: number; 
+    longest_streak: number; 
+    elite_count: number 
+  } | null>(null);
 
   const exams = useExams();
   const { projects = [], isLoading: projectsLoading } = useProjects();
@@ -75,21 +79,23 @@ export default function PlannerPage() {
   ]);
 
   const activeProjects = useMemo(() => {
-  return (projects || []).filter((p: any) => p.status === 'active');
-}, [projects]);
+    return (projects || []).filter((p: any) => p.status === 'active');
+  }, [projects]);
 
-const futureRevision = useMemo(() => {
-  return (revisionSlots || [])
-    .filter((slot: any) => slot.date > today && !slot.is_completed)
-    .sort((a: any, b: any) => a.date.localeCompare(b.date));
-}, [revisionSlots, today]);
+  const futureRevision = useMemo(() => {
+    return (revisionSlots || [])
+      .filter((slot: any) => slot.date > today && !slot.is_completed)
+      .sort((a: any, b: any) => a.date.localeCompare(b.date));
+  }, [revisionSlots, today]);
 
-  // 🎯 DEFINE TRUTH CONSTANTS (Must be before useEffects that use them)
+  // 🎯 TRUTH CONSTANTS
   const todayPlan = activePlan?.days[0];
   const tomorrowPlan = activePlan?.days[1];
-  const isSecured = todayPlan ? todayPlan.completedTaskCount >= todayPlan.plannedTaskCount : false;
-  const isElite = todayPlan ? todayPlan.completedTaskCount > todayPlan.plannedTaskCount : false;
+  
   const hasTasks = todayPlan ? todayPlan.plannedTaskCount > 0 : false;
+  const isSecured = todayPlan ? todayPlan.completedTaskCount >= todayPlan.plannedTaskCount : false;
+  const isElite = todayPlan && hasTasks ? todayPlan.completedTaskCount > todayPlan.plannedTaskCount : false;
+  const bonusCount = todayPlan && isElite ? todayPlan.completedTaskCount - todayPlan.plannedTaskCount : 0;
 
   useEffect(() => {
     if (urlView === "weekly") setView("weekly");
@@ -105,7 +111,7 @@ const futureRevision = useMemo(() => {
 
       const { data } = await supabase
         .from('planner_stats')
-        .select('current_streak, elite_count')
+        .select('current_streak, longest_streak, elite_count')
         .eq('user_id', user.id)
         .single();
 
@@ -115,45 +121,43 @@ const futureRevision = useMemo(() => {
     fetchStats();
   }, [completions.allCompletions]); 
 
-  // Auto sync count 
+  // Auto sync stats
   useEffect(() => {
-  // 🎯 1. THE GATEKEEPER: If the plan isn't ready, do nothing.
-  if (!todayPlan) return;
-  
-  const syncStats = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+    if (!todayPlan) return;
+    
+    const syncStats = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
 
-      // 2. Update the daily record
-      await supabase.rpc('sync_daily_stats', {
-        target_user_id: user.id,
-        is_mission_secured: isSecured, 
-        is_elite_day: isElite,
-        planned_count: todayPlan.plannedTaskCount,    
-        completed_count: todayPlan.completedTaskCount 
-      });
+        // 1. Run the RPC to update the DB
+        await supabase.rpc('sync_daily_stats', {
+          target_user_id: user.id,
+          is_mission_secured: isSecured, 
+          is_elite_day: isElite,
+          planned_count: todayPlan.plannedTaskCount,    
+          completed_count: todayPlan.completedTaskCount 
+        });
 
-      // 3. Re-fetch stats to flip 6 -> 7
-      const { data: newStats } = await supabase
-        .from('planner_stats')
-        .select('current_streak, elite_count')
-        .eq('user_id', user.id)
-        .single();
+        // 2. 🎯 THE FIX: Fetch the NEWEST count immediately after the RPC
+        const { data: newStats } = await supabase
+          .from('planner_stats')
+          .select('current_streak, longest_streak, elite_count')
+          .eq('user_id', user.id)
+          .single();
 
-      if (newStats) setStats(newStats);
-    } catch (err) {
-      console.error("Sync Error:", err);
-    }
-  };
-  
-  syncStats();
+        if (newStats) {
+          setStats(newStats); // This updates the top bar instantly
+        }
+      } catch (err) {
+        console.error("Sync Error:", err);
+      }
+    };
+    
+    syncStats();
+  }, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, isElite]);
 
-  // 🎯 4. THE DEPENDENCY FIX:
-  // Use optional chaining here so TS knows these might be undefined initially
-}, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, isElite]);
-
-  // 🎉 Confetti Celebration Logic
+  // 🎉 Celebration Logic
   useEffect(() => {
     if (!todayPlan) return;
     
@@ -162,11 +166,11 @@ const futureRevision = useMemo(() => {
         particleCount: 150,
         spread: 70,
         origin: { y: 0.6 },
-        colors: ['#10b981', '#3b82f6', '#60a5fa']
+        colors: isElite ? ['#a855f7', '#d946ef', '#3b82f6'] : ['#10b981', '#3b82f6', '#60a5fa']
       });
     }
     lastCelebratedCount.current = todayPlan.completedTaskCount;
-  }, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, hasTasks]);
+  }, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, hasTasks, isElite]);
   
   if (!activePlan || !todayPlan) {
     return (
@@ -191,6 +195,43 @@ const futureRevision = useMemo(() => {
     <Suspense fallback={<div>Loading Plan Bee...</div>}>
       <main className="mx-auto max-w-[1400px] px-4 py-4 md:py-8 space-y-4 md:space-y-6">
         <DashboardHeader />
+
+        {/* --- LIFETIME HERO BAR --- */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex items-center gap-4">
+            <div className="h-12 w-12 rounded-2xl bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-100">
+              <ShieldCheck className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Current Streak</p>
+              <p className="text-xl font-black italic text-emerald-600">{stats?.current_streak || 0} Days</p>
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex items-center gap-4">
+            <div className="h-12 w-12 rounded-2xl bg-orange-500 flex items-center justify-center shadow-lg shadow-orange-100">
+              <Rocket className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Longest Streak</p>
+              <p className="text-xl font-black italic text-orange-600">{stats?.longest_streak || 0} Days</p>
+            </div>
+          </div>
+
+          {/* Total Elite Days Card */}
+          <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex items-center gap-4 group hover:shadow-lg transition-all duration-300">
+            <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-100 group-hover:rotate-6 transition-transform">
+              <Trophy className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Elite Status</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-xl font-black italic text-purple-600">{stats?.elite_count || 0}</p>
+                <span className="text-xl font-black text-purple-600">Days</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
           <div className="inline-flex rounded-xl bg-gray-100 p-1 w-full sm:w-auto">
@@ -220,43 +261,6 @@ const futureRevision = useMemo(() => {
                   </div>
 
                   <div className="flex flex-wrap items-center sm:justify-end gap-3">
-                    <div className="flex items-center gap-2 bg-gradient-to-br from-orange-500 to-red-600 px-3 py-1.5 rounded-2xl shadow-lg shadow-orange-200 shrink-0">
-                      <div className="relative">
-                        <span className="absolute inset-0 bg-white rounded-full animate-ping opacity-20"></span>
-                        <Rocket className="w-4 h-4 text-white fill-white" />
-                      </div>
-                      <div className="flex flex-col leading-none">
-                        <span className="text-[10px] font-black text-orange-100 uppercase tracking-tighter">Streak</span>
-                        <span className="text-sm font-black text-white italic">
-                          {stats?.current_streak || 0} Days
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 bg-gray-100/80 p-1 rounded-2xl border border-gray-200/50">
-                      <div className="group relative">
-                        <div className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all ${
-                          isSecured ? 'bg-emerald-500 shadow-sm' : 'bg-gray-300/50'
-                        }`}>
-                          <ShieldCheck className={`w-4 h-4 ${isSecured ? 'text-white' : 'text-gray-400'}`} />
-                        </div>
-                        <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-1 rounded whitespace-nowrap z-50">
-                          {hasTasks ? 'Mission Secured' : 'Rest Day Secured'}
-                        </div>
-                      </div>
-
-                      <div className="group relative">
-                        <div className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all duration-500 ${
-                          isElite ? 'bg-purple-600 shadow-lg shadow-purple-200' : 'bg-gray-300/50 opacity-40'
-                        }`}>
-                          <Target className={`w-4 h-4 ${isElite ? 'text-white' : 'text-gray-400'}`} />
-                        </div>
-                        <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[8px] font-black uppercase px-2 py-1 rounded whitespace-nowrap z-50 italic">
-                          {isElite ? 'Elite Performance' : 'Elite Status Locked'}
-                        </div>
-                      </div>
-                    </div>
-
                     {(() => {
                       const overage = todayPlan.totalPlanned - todayPlan.baseCapacity;
                       const todayLabel = capacityData?.labels[today];
@@ -268,81 +272,85 @@ const futureRevision = useMemo(() => {
                   </div>
                 </div>
 
+                {/* --- TODAY METRICS BOXES --- */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className={`p-6 bg-white rounded-3xl border transition-all duration-500 relative overflow-hidden group ${
-                    isSecured ? 'border-emerald-200 bg-emerald-50/30' : 'border-gray-100 shadow-sm'
-                  }`}>
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 italic">Current Mission Status</p>
-                    <div className="flex items-center justify-between relative z-10">
-                      <div className="flex items-baseline gap-1">
-                        <p className={`text-5xl font-black transition-colors duration-500 ${isSecured ? 'text-emerald-600' : 'text-slate-900'}`}>
-                          {todayPlan.completedTaskCount}
-                        </p>
-                        <p className="text-xl font-bold text-slate-300 italic">/ {todayPlan.plannedTaskCount}</p>
-                      </div>
-                      <div className="text-right flex flex-col items-end gap-1">
-                        {isSecured ? (
-                          <div className="flex flex-col items-end animate-in fade-in duration-700">
-                            <div className="h-7 w-7 rounded-full bg-emerald-100 flex items-center justify-center mb-1"><ShieldCheck className="w-4 h-4 text-emerald-600" /></div>
-                            <p className="text-[9px] font-black text-emerald-600 uppercase italic">
-                                {hasTasks ? 'Mission Secured' : 'Rest Secured'}
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-end opacity-60">
-                            <div className="h-7 w-7 rounded-full bg-slate-100 flex items-center justify-center mb-1"><Target className="w-4 h-4 text-blue-600 animate-pulse" /></div>
-                            <p className="text-[9px] font-black text-slate-500 uppercase italic">Keep Going</p>
-                          </div>
-                        )}
-                      </div>
+                {/* Today's Mission Status */}
+                <div className={`p-6 rounded-[2.5rem] border transition-all duration-500 relative overflow-hidden group ${
+                  isElite 
+                    ? 'bg-purple-50 border-purple-200 shadow-lg shadow-purple-100/20' 
+                    : isSecured ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-100 shadow-sm'
+                }`}>
+                  <div className="flex justify-between items-start mb-4">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Mission Progress</p>
+                    
+                    <div className="flex gap-2">
+                      {/* 🎯 ELITE TROPHY (Only shows if isElite is true) */}
+                      {isElite && (
+                        <span className="bg-purple-600 text-white text-[8px] font-black px-2 py-1 rounded-full flex items-center gap-1 animate-in zoom-in duration-300">
+                          <Trophy className="w-3 h-3" /> ELITE +{bonusCount}
+                        </span>
+                      )}
+                      {/* SECURED BADGE */}
+                      {isSecured && !isElite && (
+                        <span className="bg-emerald-500 text-white text-[8px] font-black px-2 py-1 rounded-full flex items-center gap-1">
+                          <ShieldCheck className="w-3 h-3" /> SECURED
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <div className={`p-6 bg-white rounded-3xl border transition-all duration-500 ${
-                    todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'border-emerald-100 bg-emerald-50/10' : 'border-gray-100 shadow-sm'
-                  }`}>
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 italic">Work Load</p>
-                    <div className="flex flex-col">
-                      <div className="flex items-baseline gap-1">
-                        <p className={`text-5xl font-black italic transition-colors duration-500 ${todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-900'}`}>
-                          {Math.floor(todayPlan.totalCompleted / 60)}h<span className="text-2xl">{todayPlan.totalCompleted % 60}m</span>
-                        </p>
-                        <p className="text-xl font-bold text-slate-300 italic">/ {Math.floor(todayPlan.totalPlanned / 60)}h{todayPlan.totalPlanned % 60}m</p>
+                  <div className="flex items-baseline gap-2 relative z-10">
+                    <p className={`text-6xl font-black italic tracking-tighter transition-colors ${
+                      isElite ? 'text-purple-600' : isSecured ? 'text-emerald-600' : 'text-slate-900'
+                    }`}>
+                      {todayPlan.completedTaskCount}
+                    </p>
+                    <p className="text-2xl font-bold text-gray-300 not-italic">/ {todayPlan.plannedTaskCount}</p>
+                  </div>
+                </div>
+               
+
+                {/* Workload Progress */}
+                <div className={`p-6 bg-white rounded-[2.5rem] border transition-all duration-500 ${
+                  todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'border-emerald-100 bg-emerald-50/10' : 'border-gray-100 shadow-sm'
+                }`}>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 italic">Work Load</p>
+                  <div className="flex flex-col">
+                    <div className="flex items-baseline gap-1">
+                      <p className={`text-5xl font-black italic transition-colors duration-500 ${todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-900'}`}>
+                        {Math.floor(todayPlan.totalCompleted / 60)}h<span className="text-2xl">{todayPlan.totalCompleted % 60}m</span>
+                      </p>
+                      <p className="text-xl font-bold text-slate-300 italic">/ {Math.floor(todayPlan.totalPlanned / 60)}h{todayPlan.totalPlanned % 60}m</p>
+                    </div>
+                    <div className="mt-4 flex flex-col gap-2">
+                      <div className="h-3 w-full bg-gray-100 rounded-full overflow-hidden p-0.5">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-1000 ease-out ${todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'bg-emerald-500' : 'bg-blue-600'}`}
+                          style={{ width: `${Math.min(100, (todayPlan.totalCompleted / (todayPlan.totalPlanned || 1)) * 100)}%` }} 
+                        />
                       </div>
-                      <div className="mt-4 flex flex-col gap-2">
-                        <div className="h-3 w-full bg-gray-100 rounded-full overflow-hidden p-0.5">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-1000 ease-out ${todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'bg-emerald-500' : 'bg-blue-600'}`}
-                            style={{ width: `${Math.min(100, (todayPlan.totalCompleted / (todayPlan.totalPlanned || 1)) * 100)}%` }} 
-                          />
-                        </div>
-                        <div className="flex justify-between items-center">
-                          {todayPlan.totalCompleted >= todayPlan.totalPlanned && hasTasks ? (
-                            <p className="text-[10px] font-black uppercase italic text-emerald-600">Peak Performance</p>
-                          ) : (
-                            <p className="text-[10px] font-black uppercase italic text-slate-500">On the way</p>
-                          )}
-                          <div className={`text-[8px] font-black uppercase px-2 py-0.5 rounded italic tracking-tighter ${
-                            todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white'
-                          }`}>
-                            {todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'SECURED' : 'STEADY'}
-                          </div>
-                        </div>
+                      <div className="flex justify-between items-center text-[10px] font-black uppercase italic">
+                        <p className={todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-500'}>
+                          {todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'Peak Performance' : 'On the way'}
+                        </p>
+                        <span className={todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-900'}>
+                          {Math.round((todayPlan.totalCompleted / (todayPlan.totalPlanned || 1)) * 100)}%
+                        </span>
                       </div>
                     </div>
                   </div>
                 </div>
-                
+              </div>
                 <section className="bg-white p-1 rounded-[2.1rem] ring-4 ring-blue-600/10 border border-blue-600/20">
                   <div className="bg-white p-6 rounded-[2rem]">
                     <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-6 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-600" />Priority Checklist</h3>
-                      <DailyChecklist 
-                        day={todayPlan} 
-                        completions={checklistCompletions} 
-                        allProjects={activeProjects}    // 👈 Pass the active projects
-                        upcomingRevision={futureRevision} // 👈 Pass the future revision slots
-                      />                  
-                    </div>
+                    <DailyChecklist 
+                      day={todayPlan} 
+                      completions={checklistCompletions} 
+                      allProjects={activeProjects}
+                      upcomingRevision={futureRevision}
+                    />                  
+                  </div>
                 </section>
               </div>
             )}
