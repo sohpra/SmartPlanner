@@ -35,6 +35,11 @@ export default function PlannerPage() {
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [view, setView] = useState<"daily" | "weekly" | "monthly">("daily");
   const lastCelebratedCount = useRef(0);
+  const [isHydrating, setIsHydrating] = useState(true);
+  
+  // 🎯 BONUS MINUTE STATE
+  const [localBonusMins, setLocalBonusMins] = useState(0); // Fresh clicks in this session
+  const [dbBonusMins, setDbBonusMins] = useState(0);       // History pulled from DB
 
   // 🎯 LIVE STATS STATE
   const [stats, setStats] = useState<{ 
@@ -94,7 +99,15 @@ export default function PlannerPage() {
   
   const hasTasks = todayPlan ? todayPlan.plannedTaskCount > 0 : false;
   const isSecured = todayPlan ? todayPlan.completedTaskCount >= todayPlan.plannedTaskCount : false;
-  const isElite = todayPlan && hasTasks ? todayPlan.completedTaskCount > todayPlan.plannedTaskCount : false;
+  
+  // 🚀 HYBRID DISPLAY CALCULATION (Plan + History + Session Clicks)
+  const displayCompletedMins = (todayPlan?.totalCompleted || 0) + localBonusMins + dbBonusMins;
+
+  const isElite = todayPlan && hasTasks ? (
+    todayPlan.completedTaskCount > todayPlan.plannedTaskCount || 
+    displayCompletedMins >= (todayPlan.totalPlanned + 15)
+  ) : false;
+
   const bonusCount = todayPlan && isElite ? todayPlan.completedTaskCount - todayPlan.plannedTaskCount : 0;
 
   useEffect(() => {
@@ -103,59 +116,84 @@ export default function PlannerPage() {
     else setView("daily");
   }, [urlView]);
 
-  // FETCH LIVE STATS FROM DB
+  // FETCH LIVE STATS & HYDRATE BONUS MINUTES
   useEffect(() => {
-    const fetchStats = async () => {
+    const fetchStatsAndHistory = async () => {
+      // 🎯 THE LOCK: Don't run this until todayPlan is loaded
+      if (!todayPlan) return;
+  
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data } = await supabase
+      // 1. Fetch Top-Bar Stats
+      const { data: statsData } = await supabase
         .from('planner_stats')
         .select('current_streak, longest_streak, elite_count')
         .eq('user_id', user.id)
         .single();
+      if (statsData) setStats(statsData);
 
-      if (data) setStats(data);
+      // 2. Hydrate Bonus Minutes from DB history
+      const { data: todayData } = await supabase
+        .from('daily_stats')
+        .select('mins_completed')
+        .eq('user_id', user.id)
+        .eq('date', today)
+        .single();
+
+      if (todayData) {
+        // Calculate the difference between what's in the DB and what the base plan says
+        const basePlanMins = todayPlan.totalPlanned;
+        const actualCompletedMins = todayData.mins_completed;
+        
+        const excess = actualCompletedMins - basePlanMins;
+        
+        // If we have more mins in DB than the plan suggests, those are our persistent bonus mins
+        if (excess > 0) {
+          setDbBonusMins(excess);
+        } else {
+          setDbBonusMins(0);
+        }
+      }
+      setIsHydrating(false);
     };
 
-    fetchStats();
-  }, [completions.allCompletions]); 
+    fetchStatsAndHistory();
+    // 🎯 Re-run when todayPlan becomes available
+  }, [completions.allCompletions, today, todayPlan]);
 
-  // Auto sync stats
+  // Auto sync stats to DB
   useEffect(() => {
-    if (!todayPlan) return;
-    
+    if (!todayPlan || isHydrating) return;    
     const syncStats = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // 1. Run the RPC to update the DB
         await supabase.rpc('sync_daily_stats', {
           target_user_id: user.id,
           is_mission_secured: isSecured, 
           is_elite_day: isElite,
           planned_count: todayPlan.plannedTaskCount,    
-          completed_count: todayPlan.completedTaskCount 
+          completed_count: todayPlan.completedTaskCount,
+          planned_mins: todayPlan.totalPlanned,     
+          completed_mins: displayCompletedMins   
         });
 
-        // 2. 🎯 THE FIX: Fetch the NEWEST count immediately after the RPC
         const { data: newStats } = await supabase
           .from('planner_stats')
           .select('current_streak, longest_streak, elite_count')
           .eq('user_id', user.id)
           .single();
 
-        if (newStats) {
-          setStats(newStats); // This updates the top bar instantly
-        }
+        if (newStats) setStats(newStats);
       } catch (err) {
         console.error("Sync Error:", err);
       }
     };
     
     syncStats();
-  }, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, isElite]);
+  }, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, isElite, displayCompletedMins, isHydrating]);
 
   // 🎉 Celebration Logic
   useEffect(() => {
@@ -170,8 +208,39 @@ export default function PlannerPage() {
       });
     }
     lastCelebratedCount.current = todayPlan.completedTaskCount;
-  }, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, hasTasks, isElite]);
-  
+  }, [todayPlan?.completedTaskCount, isSecured, hasTasks, isElite]);
+
+  const handleBonusEffort = async (minutes: number) => {
+
+    if (!todayPlan) return;
+
+    setLocalBonusMins(prev => prev + minutes);
+    
+    confetti({
+      particleCount: 40,
+      spread: 50,
+      origin: { y: 0.8 },
+      colors: ['#a855f7', '#d946ef']
+    });
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      await supabase.rpc('sync_daily_stats', {
+        target_user_id: user.id,
+        is_mission_secured: isSecured, 
+        is_elite_day: true,
+        planned_count: todayPlan.plannedTaskCount,    
+        completed_count: todayPlan.completedTaskCount,
+        planned_mins: todayPlan.totalPlanned,
+        completed_mins: displayCompletedMins + minutes
+      });
+    } catch (err) {
+      console.error("Bonus Log Error:", err);
+    }
+  };
+
   if (!activePlan || !todayPlan) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
@@ -218,7 +287,6 @@ export default function PlannerPage() {
             </div>
           </div>
 
-          {/* Total Elite Days Card */}
           <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex items-center gap-4 group hover:shadow-lg transition-all duration-300">
             <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-100 group-hover:rotate-6 transition-transform">
               <Trophy className="w-6 h-6 text-white" />
@@ -233,6 +301,7 @@ export default function PlannerPage() {
           </div>
         </div>
 
+        {/* View Switcher */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
           <div className="inline-flex rounded-xl bg-gray-100 p-1 w-full sm:w-auto">
             {["daily", "weekly", "monthly"].map((v) => (
@@ -274,76 +343,88 @@ export default function PlannerPage() {
 
                 {/* --- TODAY METRICS BOXES --- */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Today's Mission Status */}
-                <div className={`p-6 rounded-[2.5rem] border transition-all duration-500 relative overflow-hidden group ${
-                  isElite 
-                    ? 'bg-purple-50 border-purple-200 shadow-lg shadow-purple-100/20' 
-                    : isSecured ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-100 shadow-sm'
-                }`}>
-                  <div className="flex justify-between items-start mb-4">
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Mission Progress</p>
-                    
-                    <div className="flex gap-2">
-                      {/* 🎯 ELITE TROPHY (Only shows if isElite is true) */}
-                      {isElite && (
-                        <span className="bg-purple-600 text-white text-[8px] font-black px-2 py-1 rounded-full flex items-center gap-1 animate-in zoom-in duration-300">
-                          <Trophy className="w-3 h-3" /> ELITE +{bonusCount}
-                        </span>
-                      )}
-                      {/* SECURED BADGE */}
-                      {isSecured && !isElite && (
-                        <span className="bg-emerald-500 text-white text-[8px] font-black px-2 py-1 rounded-full flex items-center gap-1">
-                          <ShieldCheck className="w-3 h-3" /> SECURED
-                        </span>
-                      )}
+                  {/* Mission Progress */}
+                  <div className={`p-6 rounded-[2.5rem] border transition-all duration-500 relative overflow-hidden group ${
+                    isElite 
+                      ? 'bg-purple-50 border-purple-200 shadow-lg shadow-purple-100/20' 
+                      : isSecured ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-100 shadow-sm'
+                  }`}>
+                    <div className="flex justify-between items-start mb-4">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Mission Progress</p>
+                      <div className="flex gap-2">
+                        {isElite && (
+                          <span className="bg-purple-600 text-white text-[8px] font-black px-2 py-1 rounded-full flex items-center gap-1 animate-in zoom-in duration-300">
+                            <Trophy className="w-3 h-3" /> ELITE +{bonusCount}
+                          </span>
+                        )}
+                        {isSecured && !isElite && (
+                          <span className="bg-emerald-500 text-white text-[8px] font-black px-2 py-1 rounded-full flex items-center gap-1">
+                            <ShieldCheck className="w-3 h-3" /> SECURED
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-
-                  <div className="flex items-baseline gap-2 relative z-10">
-                    <p className={`text-6xl font-black italic tracking-tighter transition-colors ${
-                      isElite ? 'text-purple-600' : isSecured ? 'text-emerald-600' : 'text-slate-900'
-                    }`}>
-                      {todayPlan.completedTaskCount}
-                    </p>
-                    <p className="text-2xl font-bold text-gray-300 not-italic">/ {todayPlan.plannedTaskCount}</p>
-                  </div>
-                </div>
-               
-
-                {/* Workload Progress */}
-                <div className={`p-6 bg-white rounded-[2.5rem] border transition-all duration-500 ${
-                  todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'border-emerald-100 bg-emerald-50/10' : 'border-gray-100 shadow-sm'
-                }`}>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 italic">Work Load</p>
-                  <div className="flex flex-col">
-                    <div className="flex items-baseline gap-1">
-                      <p className={`text-5xl font-black italic transition-colors duration-500 ${todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-900'}`}>
-                        {Math.floor(todayPlan.totalCompleted / 60)}h<span className="text-2xl">{todayPlan.totalCompleted % 60}m</span>
+                    <div className="flex items-baseline gap-2 relative z-10">
+                      <p className={`text-6xl font-black italic tracking-tighter transition-colors ${
+                        isElite ? 'text-purple-600' : isSecured ? 'text-emerald-600' : 'text-slate-900'
+                      }`}>
+                        {todayPlan.completedTaskCount}
                       </p>
-                      <p className="text-xl font-bold text-slate-300 italic">/ {Math.floor(todayPlan.totalPlanned / 60)}h{todayPlan.totalPlanned % 60}m</p>
+                      <p className="text-2xl font-bold text-gray-300 not-italic">/ {todayPlan.plannedTaskCount}</p>
                     </div>
-                    <div className="mt-4 flex flex-col gap-2">
-                      <div className="h-3 w-full bg-gray-100 rounded-full overflow-hidden p-0.5">
-                        <div 
-                          className={`h-full rounded-full transition-all duration-1000 ease-out ${todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'bg-emerald-500' : 'bg-blue-600'}`}
-                          style={{ width: `${Math.min(100, (todayPlan.totalCompleted / (todayPlan.totalPlanned || 1)) * 100)}%` }} 
-                        />
-                      </div>
-                      <div className="flex justify-between items-center text-[10px] font-black uppercase italic">
-                        <p className={todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-500'}>
-                          {todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'Peak Performance' : 'On the way'}
-                        </p>
-                        <span className={todayPlan.totalCompleted >= todayPlan.totalPlanned ? 'text-emerald-600' : 'text-slate-900'}>
-                          {Math.round((todayPlan.totalCompleted / (todayPlan.totalPlanned || 1)) * 100)}%
+                  </div>
+
+                  {/* Workload Progress */}
+                  <div className={`p-6 rounded-[2.5rem] border transition-all duration-500 ${
+                    isElite 
+                      ? 'bg-purple-50 border-purple-200 shadow-lg shadow-purple-100/20' 
+                      : isSecured ? 'border-emerald-100 bg-emerald-50/10' : 'bg-white border-gray-100 shadow-sm'
+                  }`}>
+                    <div className="flex justify-between items-start mb-2">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Work Load</p>
+                      {displayCompletedMins > todayPlan.totalPlanned && (
+                        <span className="bg-purple-600 text-white text-[7px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                          <Clock className="w-2.5 h-2.5" /> +{displayCompletedMins - todayPlan.totalPlanned}m BONUS
                         </span>
+                      )}
+                    </div>
+                    <div className="flex flex-col">
+                      <div className="flex items-baseline gap-1">
+                        <p className={`text-5xl font-black italic transition-colors duration-500 ${
+                          isElite ? 'text-purple-600' : isSecured ? 'text-emerald-600' : 'text-slate-900'
+                        }`}>
+                          {Math.floor(displayCompletedMins / 60)}h<span className="text-2xl">{displayCompletedMins % 60}m</span>
+                        </p>
+                        <p className="text-xl font-bold text-slate-300 italic">/ {Math.floor(todayPlan.totalPlanned / 60)}h{todayPlan.totalPlanned % 60}m</p>
+                      </div>
+                      <div className="mt-4 flex flex-col gap-2">
+                        <div className="h-3 w-full bg-gray-100 rounded-full overflow-hidden p-0.5">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-1000 ease-out ${
+                              isElite ? 'bg-purple-500' : isSecured ? 'bg-emerald-500' : 'bg-blue-600'
+                            }`}
+                            style={{ width: `${Math.min(100, (displayCompletedMins / (todayPlan.totalPlanned || 1)) * 100)}%` }} 
+                          />
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] font-black uppercase italic">
+                          <p className={isElite ? 'text-purple-600' : isSecured ? 'text-emerald-600' : 'text-slate-500'}>
+                            {isElite ? 'Elite Mode Active' : isSecured ? 'Target Reached' : 'On Track'}
+                          </p>
+                          <span className={isElite ? 'text-purple-600' : isSecured ? 'text-emerald-600' : 'text-slate-900'}>
+                            {displayCompletedMins} / {todayPlan.totalPlanned} Mins
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
+
+                {/* Checklist Section */}
                 <section className="bg-white p-1 rounded-[2.1rem] ring-4 ring-blue-600/10 border border-blue-600/20">
                   <div className="bg-white p-6 rounded-[2rem]">
-                    <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-6 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-600" />Priority Checklist</h3>
+                    <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-6 flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-blue-600" />Priority Checklist
+                    </h3>
                     <DailyChecklist 
                       day={todayPlan} 
                       completions={checklistCompletions} 
@@ -352,6 +433,32 @@ export default function PlannerPage() {
                     />                  
                   </div>
                 </section>
+
+                {/* --- BONUS ACTION BAR --- */}
+                <div className="mt-8 pt-6 border-t border-gray-100 flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 italic">Go Beyond the Plan</p>
+                    <p className="text-[9px] text-slate-400 font-medium">Log extra heart and soul into today's work.</p>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => handleBonusEffort(15)}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-purple-50 text-purple-600 text-[10px] font-black uppercase tracking-widest hover:bg-purple-600 hover:text-white transition-all group border border-purple-100 shadow-sm shadow-purple-100/50"
+                    >
+                      <Clock className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" />
+                      +15m Effort
+                    </button>
+
+                    <button 
+                      onClick={() => handleBonusEffort(30)}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-br from-purple-600 to-fuchsia-600 text-white text-[10px] font-black uppercase tracking-widest hover:shadow-lg hover:shadow-purple-200 transition-all group"
+                    >
+                      <Rocket className="w-3.5 h-3.5 group-hover:animate-bounce" />
+                      Elite Session (+30m)
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
