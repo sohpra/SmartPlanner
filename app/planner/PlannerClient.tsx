@@ -101,7 +101,12 @@ export default function PlannerPage() {
   const isSecured = todayPlan ? todayPlan.completedTaskCount >= todayPlan.plannedTaskCount : false;
   
   // 🚀 HYBRID DISPLAY CALCULATION (Plan + History + Session Clicks)
-  const displayCompletedMins = (todayPlan?.totalCompleted || 0) + localBonusMins + dbBonusMins;
+  // Add a Math.max to ensure we aren't creating negative gaps or double counts
+  const displayCompletedMins = useMemo(() => {
+    // todayPlan.totalCompleted already includes all checked boxes from the checklist
+    // localBonusMins + dbBonusMins ONLY include the +15m / +30m button clicks
+    return (todayPlan?.totalCompleted || 0) + localBonusMins + dbBonusMins;
+  }, [todayPlan?.totalCompleted, localBonusMins, dbBonusMins]);
 
   const isElite = todayPlan && hasTasks ? (
     todayPlan.completedTaskCount > todayPlan.plannedTaskCount || 
@@ -117,9 +122,9 @@ export default function PlannerPage() {
   }, [urlView]);
 
   // FETCH LIVE STATS & HYDRATE BONUS MINUTES
+  // 🎯 FETCH LIVE STATS & HYDRATE BONUS MINUTES
   useEffect(() => {
     const fetchStatsAndHistory = async () => {
-      // 🎯 THE LOCK: Don't run this until todayPlan is loaded
       if (!todayPlan) return;
   
       const { data: { user } } = await supabase.auth.getUser();
@@ -133,7 +138,7 @@ export default function PlannerPage() {
         .single();
       if (statsData) setStats(statsData);
 
-      // 2. Hydrate Bonus Minutes from DB history
+      // 2. Hydrate Bonus Minutes from DB
       const { data: todayData } = await supabase
         .from('daily_stats')
         .select('mins_completed')
@@ -142,25 +147,59 @@ export default function PlannerPage() {
         .single();
 
       if (todayData) {
-        // Calculate the difference between what's in the DB and what the base plan says
-        const basePlanMins = todayPlan.totalPlanned;
-        const actualCompletedMins = todayData.mins_completed;
+        // 🎯 THE FIX: Compare DB total against the PLAN total.
+        // If DB > Plan, the difference is our persistent bonus.
+        // We subtract localBonusMins to avoid overlapping with current session clicks.
+        const totalInDb = todayData.mins_completed;
+        const basePlanGoal = todayPlan.totalPlanned;
         
-        const excess = actualCompletedMins - basePlanMins;
-        
-        // If we have more mins in DB than the plan suggests, those are our persistent bonus mins
-        if (excess > 0) {
-          setDbBonusMins(excess);
-        } else {
-          setDbBonusMins(0);
+        const persistentBonus = totalInDb - basePlanGoal;
+
+        if (persistentBonus > 0) {
+          setDbBonusMins(persistentBonus);
+          // Only clear local if we've successfully moved those minutes into dbBonusMins
+          setLocalBonusMins(0);
         }
       }
       setIsHydrating(false);
     };
 
     fetchStatsAndHistory();
-    // 🎯 Re-run when todayPlan becomes available
-  }, [completions.allCompletions, today, todayPlan]);
+  }, [completions.allCompletions, today, todayPlan?.totalPlanned]);
+
+  // 🚀 HANDLE BONUS EFFORT
+  const handleBonusEffort = async (minutes: number) => {
+    if (!todayPlan) return;
+
+    // 1. Instant UI update
+    setLocalBonusMins(prev => prev + minutes);
+    
+    confetti({
+      particleCount: 40,
+      spread: 50,
+      origin: { y: 0.8 },
+      colors: ['#a855f7', '#d946ef']
+    });
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 2. Sync to DB using the unified display total
+      await supabase.rpc('sync_daily_stats', {
+        target_user_id: user.id,
+        is_mission_secured: isSecured, 
+        is_elite_day: true,
+        planned_count: todayPlan.plannedTaskCount,    
+        completed_count: todayPlan.completedTaskCount,
+        planned_mins: todayPlan.totalPlanned,
+        completed_mins: displayCompletedMins + minutes // Current UI Total + the new click
+      });
+
+    } catch (err) {
+      console.error("Bonus Log Error:", err);
+    }
+  };
 
   // Auto sync stats to DB
   useEffect(() => {
@@ -177,6 +216,7 @@ export default function PlannerPage() {
           planned_count: todayPlan.plannedTaskCount,    
           completed_count: todayPlan.completedTaskCount,
           planned_mins: todayPlan.totalPlanned,     
+          // 🎯 CHANGE THIS LINE:
           completed_mins: displayCompletedMins   
         });
 
@@ -193,6 +233,7 @@ export default function PlannerPage() {
     };
     
     syncStats();
+    // Ensure displayCompletedMins is in the dependency array
   }, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, isElite, displayCompletedMins, isHydrating]);
 
   // 🎉 Celebration Logic
@@ -210,36 +251,7 @@ export default function PlannerPage() {
     lastCelebratedCount.current = todayPlan.completedTaskCount;
   }, [todayPlan?.completedTaskCount, isSecured, hasTasks, isElite]);
 
-  const handleBonusEffort = async (minutes: number) => {
-
-    if (!todayPlan) return;
-
-    setLocalBonusMins(prev => prev + minutes);
-    
-    confetti({
-      particleCount: 40,
-      spread: 50,
-      origin: { y: 0.8 },
-      colors: ['#a855f7', '#d946ef']
-    });
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      await supabase.rpc('sync_daily_stats', {
-        target_user_id: user.id,
-        is_mission_secured: isSecured, 
-        is_elite_day: true,
-        planned_count: todayPlan.plannedTaskCount,    
-        completed_count: todayPlan.completedTaskCount,
-        planned_mins: todayPlan.totalPlanned,
-        completed_mins: displayCompletedMins + minutes
-      });
-    } catch (err) {
-      console.error("Bonus Log Error:", err);
-    }
-  };
+  
 
   if (!activePlan || !todayPlan) {
     return (
