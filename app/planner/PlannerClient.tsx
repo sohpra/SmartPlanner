@@ -46,6 +46,7 @@ export default function PlannerPage() {
     current_streak: number; 
     longest_streak: number; 
     elite_count: number 
+    lifetime_bonus_mins: number; 
   } | null>(null);
 
   const exams = useExams();
@@ -133,7 +134,7 @@ export default function PlannerPage() {
       // 1. Fetch Top-Bar Stats
       const { data: statsData } = await supabase
         .from('planner_stats')
-        .select('current_streak, longest_streak, elite_count')
+        .select('current_streak, longest_streak, elite_count,lifetime_bonus_mins')
         .eq('user_id', user.id)
         .single();
       if (statsData) setStats(statsData);
@@ -222,7 +223,7 @@ export default function PlannerPage() {
 
         const { data: newStats } = await supabase
           .from('planner_stats')
-          .select('current_streak, longest_streak, elite_count')
+          .select('current_streak, longest_streak, elite_count, lifetime_bonus_mins')
           .eq('user_id', user.id)
           .single();
 
@@ -303,11 +304,18 @@ export default function PlannerPage() {
             <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-100 group-hover:rotate-6 transition-transform">
               <Trophy className="w-6 h-6 text-white" />
             </div>
-            <div>
+            <div className="flex-1">
               <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Elite Status</p>
-              <div className="flex items-center gap-1.5">
-                <p className="text-xl font-black italic text-purple-600">{stats?.elite_count || 0}</p>
-                <span className="text-xl font-black text-purple-600">Days</span>
+              <div className="flex items-center justify-between">
+                <p className="text-xl font-black italic text-purple-600">{stats?.elite_count || 0} Days</p>
+                
+                {/* 💰 THE VAULT: Shows redeemable time */}
+                <div className="flex flex-col items-end">
+                  <span className="text-[14px] font-black text-emerald-500 flex items-center gap-1">
+                    <Clock className="w-2 h-2" /> {Math.floor((stats?.lifetime_bonus_mins || 0) / 60)}h { (stats?.lifetime_bonus_mins || 0) % 60}m
+                  </span>
+                  <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter italic">Banked</p>
+                </div>
               </div>
             </div>
           </div>
