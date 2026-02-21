@@ -153,60 +153,40 @@ export function buildWeekPlan({
     }
   }
 
-  // 5. REVISION (Date-Normalization Fix)
-  // 5. REVISION (The "Hustle" Shield Fix)
+  // 5. REVISION (Strict DB Sync)
   const revisionItems: Record<string, any[]> = {};
   windowDates.forEach(d => revisionItems[d] = []);
 
-  const allSlots = (revisionSlots || []) as any[];
-  const isSlotDone = (s: any) => s.is_completed === true || todayCompletionKeys.has(`revision:${s.id}`);
-
-  // Separate slots into categories
-  const doneSlots = allSlots.filter(s => isSlotDone(s));
-  const pendingSlots = allSlots.filter(s => !isSlotDone(s));
-
-  doneSlots.forEach(s => {
-    if (revisionItems[today]) {
-      const mins = s.duration_minutes || s.slotMinutes || 30;
-      const label = s.label || s.displayName || s.description || "Revision";
-
-      // 🎯 THE CRITICAL SHIELD:
-      // A revision slot is a bonus if:
-      // 1. It explicitly contains the [Bonus] tag (from our Exams page pull)
-      // 2. OR its original date in the DB was in the future (backup check)
-      const isBonus = label.includes('[Bonus]') || (s.date && s.date > today);
-
-      revisionItems[today].push({ 
-        ...s, 
-        id: s.id, 
-        type: 'revision', 
-        isDone: true, 
-        minutes: mins, 
-        isBonus: isBonus, // 👈 This prevents incrementing 'plannedTaskCount'
-        name: label,
-        subject: s.subject || "Revision"
-      });
-
-      // Only subtract from the day's capacity if it was part of the original requirement
-      if (!isBonus) occupiedCap[today] += mins;
-    }
-  });
-
-  pendingSlots.forEach(slot => {
+  // 🎯 THE FIX:
+  // We only iterate over slots that ACTUALLY EXIST in the database.
+  // We do NOT let the engine "simulate" any slots for today.
+  (revisionSlots || []).forEach((slot: any) => {
     const assignedDate = slot.date ? String(slot.date).split('T')[0] : null;
-    if (assignedDate && assignedDate >= today && revisionItems[assignedDate]) {
-      const mins = slot.slotMinutes || slot.duration_minutes || 30;
+    
+    // Only process if the date exists in our 60-day window
+    if (assignedDate && revisionItems[assignedDate]) {
+      const isDone = slot.is_completed === true || todayCompletionKeys.has(`revision:${slot.id}`);
+      const mins = slot.duration_minutes || 30;
+      const label = slot.description || "Revision";
+
+      // A slot is a bonus if it was pulled from the future 
+      // OR marked as [Bonus] on the exams page
+      const isBonus = label.includes('[Bonus]') || (slot.date > today);
+
       revisionItems[assignedDate].push({
         id: slot.id, 
         type: 'revision', 
-        isDone: false, 
+        isDone: isDone, 
         minutes: mins, 
-        isBonus: false,
-        name: slot.label || slot.displayName || slot.description || "Revision",
-        subject: slot.subject || "Revision",
-        examId: slot.exam_id
+        isBonus: isBonus,
+        name: label,
+        subject: slot.subject || "Revision"
       });
-      occupiedCap[assignedDate] += mins;
+
+      // Denominator logic: only add to planned total if it's a "natural" today slot
+      if (!isBonus && assignedDate === today) {
+        occupiedCap[today] += mins;
+      }
     }
   });
 

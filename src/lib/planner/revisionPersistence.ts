@@ -152,8 +152,17 @@ export async function syncRevisionSlots() {
       ));
     }
 
+    // 🎯 SAFETY BREAK: 
+    // If our capacity map is empty or mostly 0, ABORT.
+    // This prevents the engine from dumping everything into Today 
+    // just because the network hasn't returned settings yet.
+    const totalCapacityDetected = Object.values(engineCapacityMap).reduce((a, b) => a + b, 0);
+    if (totalCapacityDetected === 0) {
+      console.warn("⚠️ Capacity map is empty. Aborting sync to prevent slot dumping.");
+      return { success: false, message: "Capacity not ready" };
+    }
+
     // 6. THE IRON SHIELD EVALUATION
-    // 🎯 6. THE IRON SHIELD EVALUATION (Deterministic Fix)
     const virtualPlanFull = planRevisionSlots(exams, {
       startDate: today,
       numDays: 60,

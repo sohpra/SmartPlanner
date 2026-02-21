@@ -68,8 +68,19 @@ export default function PlannerPage() {
   const { capacityData, loading: capacityLoading, refresh: refreshCapacity } = usePlannerCapacity();
 
   const activePlan = useMemo(() => {
-    const isDataLoaded = !exams.loading && !projectsLoading && !deadlinesLoading && !weeklyLoading && !capacityLoading && !revisionLoading;
-    if (!isDataLoaded || !capacityData) return null;
+    // 🎯 THE SHIELD: 
+    // We must NOT run buildWeekPlan if capacityData is missing.
+    // In production, this data often arrives a few milliseconds after the component mounts.
+    const isDataLoaded = 
+      !exams.loading && 
+      !projectsLoading && 
+      !deadlinesLoading && 
+      !weeklyLoading && 
+      !capacityLoading && 
+      !revisionLoading &&
+      !!capacityData; // 👈 CRITICAL: Ensure capacityData is truthy
+
+    if (!isDataLoaded) return null;
 
     return buildWeekPlan({
       today,
@@ -79,7 +90,7 @@ export default function PlannerPage() {
       exams: exams.upcoming || [],
       projects,
       completions: completions.allCompletions || [],
-      capacityData,
+      capacityData, // Now we are sure this isn't empty
       revisionSlots, 
     });
   }, [today, exams.upcoming, projects, deadlines, weeklyTasks, exams.loading, projectsLoading, deadlinesLoading, weeklyLoading, completions.allCompletions, capacityData, capacityLoading, revisionSlots, revisionLoading]);
