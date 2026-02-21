@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { usePlannerCapacity } from "@/hooks/use-planner-capacity";
 import Link from "next/link";
+import { syncRevisionSlots } from "@/lib/planner/revisionPersistence";
 
 const DAYS_DISPLAY = [
   { label: "Monday",    index: 1 },
@@ -59,16 +60,17 @@ export default function SettingsPage() {
     if (error) {
       console.error("Save Error:", error);
     } else {
-      await refresh();
-      alert("Baseline Synced!");
+      await syncRevisionSlots(); // 🎯 RE-RUN THE BRAIN
+      alert("Baseline Synced & Roadmap Re-calculated!");
     }
     setIsSaving(false);
   };
 
-  const addException = async () => {
+const addException = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || !newException.startDate) return;
 
+    setIsSaving(true); // 🎯 Use a loading state for the brain sync too
     const datesToInsert = [];
     if (isRange && newException.endDate) {
       let current = new Date(newException.startDate);
@@ -91,14 +93,26 @@ export default function SettingsPage() {
       });
     }
 
-    await supabase.from('planner_overrides').upsert(datesToInsert);
-    setNewException({ startDate: "", endDate: "", mins: 150, label: "" });
-    await refresh();
+    const { error } = await supabase.from('planner_overrides').upsert(datesToInsert);
+    
+    if (!error) {
+      setNewException({ startDate: "", endDate: "", mins: 150, label: "" });
+      await refresh();            // Refresh local capacity hook
+      await syncRevisionSlots();  // 🎯 RE-RUN THE BRAIN
+      alert("Exception Added & Roadmap Re-shuffled!");
+    }
+    setIsSaving(false);
   };
 
   const deleteException = async (date: string) => {
-    await supabase.from('planner_overrides').delete().eq('date', date);
-    await refresh();
+    setIsSaving(true);
+    const { error } = await supabase.from('planner_overrides').delete().eq('date', date);
+    
+    if (!error) {
+      await refresh();            // Refresh local capacity hook
+      await syncRevisionSlots();  // 🎯 RE-RUN THE BRAIN
+    }
+    setIsSaving(false);
   };
 
   if (loading) return <div className="p-10 text-center font-black uppercase tracking-widest text-gray-400 italic">Syncing Operations...</div>;
