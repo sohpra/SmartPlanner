@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabase/client";
 import { planRevisionSlots, ExamInput, addDays, daysBetween } from "./revisionEngine";
 
-// 🎯 Interface to clear TS errors on the Supabase response
+// 🎯 Interface for Supabase responses
 interface RevisionSlotRow {
   id: string;
   duration_minutes: number;
@@ -18,14 +18,32 @@ export async function syncRevisionSlots() {
 
   try {
     // 1. FETCH ALL DATA
-    const [examsRes, recurringRes, homeworkRes, settingsRes, overridesRes, allSlotsToday, completionsTodayRes] = await Promise.all([
+    const [
+      examsRes, 
+      recurringRes, 
+      homeworkRes, 
+      settingsRes, 
+      overridesRes, 
+      allSlotsToday, 
+      completionsTodayRes,
+      historicalCompletionsRes
+    ] = await Promise.all([
       supabase.from("exams").select("*").gte("date", today),
       supabase.from("recurring_tasks").select("*").eq("user_id", user.id),
-      supabase.from("deadline_tasks").select("*, is_fixed, scheduled_date").or(`status.eq.active,status.eq.completed`).gte("due_date", today), 
+      supabase.from("deadline_tasks")
+        .select("*, is_fixed, scheduled_date")
+        .or(`status.eq.active,status.eq.completed`)
+        .gte("due_date", today), 
       supabase.from("planner_settings").select("*").eq("user_id", user.id),
       supabase.from("planner_overrides").select("*").eq("user_id", user.id).gte("date", today),
-      supabase.from("revision_slots").select("id, duration_minutes, is_completed, date, description").match({ user_id: user.id, date: today }),
-      supabase.from("daily_completions").select("source_id, source_type").eq("user_id", user.id).eq("date", today)
+      supabase.from("revision_slots")
+        .select("id, duration_minutes, is_completed, date, description")
+        .match({ user_id: user.id, date: today }),
+      supabase.from("daily_completions").select("source_id, source_type").eq("user_id", user.id).eq("date", today),
+      supabase.from("revision_slots")
+        .select("exam_id")
+        .eq("user_id", user.id)
+        .eq("is_completed", true) // 🎯 Get the "Debt" context
     ]);
 
     const exams = (examsRes.data || []) as ExamInput[];
@@ -34,6 +52,7 @@ export async function syncRevisionSlots() {
     const settingsRows = settingsRes.data || [];
     const overridesRows = overridesRes.data || [];
     const completionsToday = completionsTodayRes.data || [];
+    const historicalCompletions = historicalCompletionsRes.data || [];
     
     const slotsToday = (allSlotsToday.data || []) as RevisionSlotRow[];
     const hasAnySlotsToday = slotsToday.length > 0;
@@ -41,9 +60,9 @@ export async function syncRevisionSlots() {
     // 🎯 SHIELD LOGIC: Is today already finished?
     const allTodayDone = slotsToday.length > 0 && slotsToday.every(s => s.is_completed);
     const missionAlreadySecured = hasAnySlotsToday && allTodayDone;
+    const anyRevisionDone = slotsToday.some(s => s.is_completed);
 
     // 🎯 THE GHOST SLOT FIX: Count minutes ALREADY assigned to today's revision
-    // This includes any slots Rehan/Sohini just "Pulled Forward"
     const revisionMinsAlreadyToday = slotsToday.reduce((sum, s) => sum + (s.duration_minutes || 0), 0);
 
     // 2. MAP CAPACITY
@@ -61,7 +80,6 @@ export async function syncRevisionSlots() {
       const dow = new Date(d + "T00:00:00").getDay();
       let budget = dateOverrides[d] ?? weeklyPattern[dow] ?? 150;
       
-      // 🛡️ HARD SEAL: If mission is secured, today's budget is 0
       if (d === today && missionAlreadySecured) {
         budget = 0;
       }
@@ -82,7 +100,7 @@ export async function syncRevisionSlots() {
       engineCapacityMap[d] = budget;
     });
 
-    // 4. HOMEWORK PLACEMENT
+    // 4. HOMEWORK PLACEMENT (Simulation)
     const tasksToUpdate: { id: string, scheduled_date: string }[] = [];
     const occupiedByHw: Record<string, number> = {};
     windowDates.forEach(d => occupiedByHw[d] = 0);
@@ -92,7 +110,7 @@ export async function syncRevisionSlots() {
       return daysBetween(today, a.due_date) - daysBetween(today, b.due_date);
     });
 
-    const searchStartDate = missionAlreadySecured ? tomorrow : today;
+    const searchStartDate = (missionAlreadySecured || anyRevisionDone) ? tomorrow : today;
 
     for (const task of sortedHw) {
       if (task.status === 'completed') {
@@ -106,7 +124,7 @@ export async function syncRevisionSlots() {
 
       if (task.scheduled_date) {
         const preferredDate = task.scheduled_date.split('T')[0];
-        if (task.is_fixed || preferredDate === today) {
+        if (task.is_fixed || (preferredDate === today && !missionAlreadySecured)) {
           if (occupiedByHw[preferredDate] !== undefined) placedDate = preferredDate;
         }
       }
@@ -128,7 +146,7 @@ export async function syncRevisionSlots() {
           }
         }
         if (!placedDate) {
-          placedDate = (dayBeforeDeadline >= searchStartDate) ? searchStartDate : today;
+          placedDate = (dayBeforeDeadline >= searchStartDate) ? dayBeforeDeadline : searchStartDate;
         }
       }
 
@@ -141,7 +159,6 @@ export async function syncRevisionSlots() {
 
     // 5. UPDATE DB & PREP REVISION GAPS
     windowDates.forEach(d => {
-      // 🎯 THE GHOST FIX: Subtract what's already in the DB for today to prevent double-scheduling
       const existingRevisionMins = (d === today) ? revisionMinsAlreadyToday : 0;
       engineCapacityMap[d] = Math.max(0, engineCapacityMap[d] - occupiedByRocks[d] - occupiedByHw[d] - existingRevisionMins);
     });
@@ -152,41 +169,31 @@ export async function syncRevisionSlots() {
       ));
     }
 
-    // 🎯 SAFETY BREAK: 
-    // If our capacity map is empty or mostly 0, ABORT.
-    // This prevents the engine from dumping everything into Today 
-    // just because the network hasn't returned settings yet.
-    const totalCapacityDetected = Object.values(engineCapacityMap).reduce((a, b) => a + b, 0);
-    if (totalCapacityDetected === 0) {
-      console.warn("⚠️ Capacity map is empty. Aborting sync to prevent slot dumping.");
-      return { success: false, message: "Capacity not ready" };
-    }
+    // 🎯 6. THE IRON SHIELD EVALUATION (Data-Driven)
+    const completionMap = (historicalCompletions || []).reduce((acc: any, curr: any) => {
+      acc[curr.exam_id] = (acc[curr.exam_id] || 0) + 1;
+      return acc;
+    }, {});
 
-    // 6. THE IRON SHIELD EVALUATION
-    const virtualPlanFull = planRevisionSlots(exams, {
+    const virtualPlanFull = planRevisionSlots(exams, { 
       startDate: today,
       numDays: 60,
       capacityByDate: engineCapacityMap, 
-      includeExamDay: false
+      includeExamDay: false,
+      completionMap: completionMap 
     });
 
-    // Determine if we should lock today's revision slots
-    // 1. Mission is secured (everything done)
-    // 2. ANY revision slot has been completed (the day has started)
-    const anyRevisionDone = slotsToday.some(s => s.is_completed);
-    
+    // 🎯 7. ATOMIC DB SYNC
     let syncFromDate = today;
-    
     if (missionAlreadySecured || anyRevisionDone) {
       syncFromDate = tomorrow;
     }
 
-    // 🎯 7. ATOMIC DB SYNC & CLEANUP
-    // Use the syncFromDate to ensure we never delete completed work
+    // Always clear uncompleted slots from Today onwards to prevent stacking
     await supabase.from("revision_slots")
       .delete()
       .match({ user_id: user.id, is_completed: false })
-      .gte("date", syncFromDate); // 👈 Changed from deleteFromDate to syncFromDate
+      .gte("date", today); 
 
     const rowsToInsert = virtualPlanFull.days
       .filter(day => day.date >= syncFromDate)

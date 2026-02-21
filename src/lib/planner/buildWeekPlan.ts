@@ -68,13 +68,49 @@ export function buildWeekPlan({
       }));
   });
 
-  // 4. HOMEWORK (Section with Stability Fix)
-  const homeworkItems: Record<string, any[]> = {};
-  const occupiedCap: Record<string, number> = {};
+// 1. HARMONIZE IDs & COMPLETIONS (Keep as is)
+  // 2. CAPACITY MAP (Keep as is)
+  // 3. WEEKLY ITEMS (Keep as is)
+
+  // 🎯 4. REVISION 
+  // 🎯 4. REVISION (Processing BEFORE Homework)
+  const revisionItems: Record<string, any[]> = {};
+  const occupiedCap: Record<string, number> = {}; 
+  
   windowDates.forEach(d => {
-    homeworkItems[d] = [];
+    revisionItems[d] = [];
     occupiedCap[d] = (weeklyItems[d] || []).reduce((sum, i) => sum + (i.minutes || 0), 0);
   });
+  
+  const processedRevisionIds = new Set();
+  (revisionSlots || []).forEach((slot: any) => {
+    if (processedRevisionIds.has(slot.id)) return;
+    
+    // Strict date normalization
+    const assignedDate = slot.date ? String(slot.date).split('T')[0].split(' ')[0] : null;
+    
+    if (assignedDate && revisionItems[assignedDate]) {
+      const isDone = slot.is_completed === true || todayCompletionKeys.has(`revision:${slot.id}`);
+      const mins = slot.duration_minutes || 30;
+      const examName = slot.displayName || slot.description || "Revision Session";
+      const isBonus = (assignedDate === today && slot.date > today) || examName.includes('[Bonus]');
+
+      revisionItems[assignedDate].push({
+        id: slot.id, type: 'revision', isDone, minutes: mins, isBonus,
+        name: examName, subject: slot.subject || "Revision", examId: slot.exam_id
+      });
+
+      // 🛡️ REVISION RESERVATION: Now Homework Pass 1 will see this capacity as full
+      if (!isBonus) {
+        occupiedCap[assignedDate] += mins;
+      }
+      processedRevisionIds.add(slot.id);
+    }
+  });
+
+  // 🎯 5. HOMEWORK (Now running with full awareness of Revision)
+  const homeworkItems: Record<string, any[]> = {};
+  windowDates.forEach(d => { homeworkItems[d] = []; });
 
   const sortedHw = [...(deadlines || [])].sort((a: any, b: any) => {
     if (a.is_fixed !== b.is_fixed) return a.is_fixed ? -1 : 1;
@@ -88,48 +124,34 @@ export function buildWeekPlan({
 
     let dbScheduledDate = task.scheduled_date ? String(task.scheduled_date).split('T')[0] : null;
     const mappedBase = { 
-      id: task.id, 
-      name: task.name, 
-      minutes: task.estimated_minutes, 
-      dueDate: task.due_date,
-      isDone: isDoneToday,
-      subject: task.subject_name || task.subject || "",
-      type: 'deadline_task',
-      is_fixed: task.is_fixed,
-      scheduledDate: dbScheduledDate,
-      isBonus: false 
+      id: task.id, name: task.name, minutes: task.estimated_minutes, dueDate: task.due_date,
+      isDone: isDoneToday, subject: task.subject_name || task.subject || "",
+      type: 'deadline_task', is_fixed: task.is_fixed, scheduledDate: dbScheduledDate, isBonus: false 
     };
 
+    // If already scheduled in DB, place it and update occupiedCap
     if (dbScheduledDate && homeworkItems[dbScheduledDate]) {
       const isBonus = isDoneToday && dbScheduledDate > today;
       const targetDate = isBonus ? today : dbScheduledDate;
-      
       homeworkItems[targetDate].push({ ...mappedBase, isBonus });
       occupiedCap[targetDate] += task.estimated_minutes;
       continue;
     }
 
-    // Simulation
-    // --- CASE C: Simulation ---
+    // --- Simulation ---
     let placedDate: string | null = null;
     const dayBeforeDeadline = addDays(task.due_date, -1);
-    
-    // 🎯 1. MISSION LOCK: If today is secured, we start our search from TOMORROW
     const todayIsSecured = (todayCompletionKeys.size >= (homeworkItems[today]?.length || 0));
     const searchStartDate = (todayIsSecured && windowDates[1]) ? windowDates[1] : today;
+    const possibleDays = windowDates.filter(date => date >= searchStartDate && date <= dayBeforeDeadline);
 
-    const possibleDays = windowDates.filter(date => 
-      date >= searchStartDate && date <= dayBeforeDeadline
-    );
-
-    // Pass 1: Polite Search
+    // Pass 1: Polite Search (Respecting the 45m buffer)
     for (const d of possibleDays) {
       if (occupiedCap[d] + task.estimated_minutes + 45 <= baseCapMap[d]) {
         placedDate = d; break;
       }
     }
-
-    // Pass 2: Emergency Search
+    // Pass 2: Emergency Search (No buffer)
     if (!placedDate) {
       for (const d of possibleDays) {
         if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
@@ -137,58 +159,17 @@ export function buildWeekPlan({
         }
       }
     }
-
-    // Pass 3: The "Last Resort" 
+    // Pass 3: The "Last Resort" (Ensures it gets done before due date)
     if (!placedDate) {
-      // If we couldn't find a spot in the restricted window, 
-      // default to the day before deadline (as long as that's not 'today' while secured)
       placedDate = possibleDays.length > 0 ? dayBeforeDeadline : searchStartDate;
     }
 
-    // Final Placement
     if (placedDate && homeworkItems[placedDate]) {
       const isBonus = placedDate === today && baseCapMap[today] === 0;
       homeworkItems[placedDate].push({ ...mappedBase, isBonus });
       occupiedCap[placedDate] += task.estimated_minutes;
     }
-  }
-
-  // 5. REVISION (Strict DB Sync)
-  const revisionItems: Record<string, any[]> = {};
-  windowDates.forEach(d => revisionItems[d] = []);
-
-  // 🎯 THE FIX:
-  // We only iterate over slots that ACTUALLY EXIST in the database.
-  // We do NOT let the engine "simulate" any slots for today.
-  (revisionSlots || []).forEach((slot: any) => {
-    const assignedDate = slot.date ? String(slot.date).split('T')[0] : null;
-    
-    // Only process if the date exists in our 60-day window
-    if (assignedDate && revisionItems[assignedDate]) {
-      const isDone = slot.is_completed === true || todayCompletionKeys.has(`revision:${slot.id}`);
-      const mins = slot.duration_minutes || 30;
-      const label = slot.description || "Revision";
-
-      // A slot is a bonus if it was pulled from the future 
-      // OR marked as [Bonus] on the exams page
-      const isBonus = label.includes('[Bonus]') || (slot.date > today);
-
-      revisionItems[assignedDate].push({
-        id: slot.id, 
-        type: 'revision', 
-        isDone: isDone, 
-        minutes: mins, 
-        isBonus: isBonus,
-        name: label,
-        subject: slot.subject || "Revision"
-      });
-
-      // Denominator logic: only add to planned total if it's a "natural" today slot
-      if (!isBonus && assignedDate === today) {
-        occupiedCap[today] += mins;
-      }
-    }
-  });
+  }  
 
   // 6. PROJECTS (Stability & Denominator Fix)
   const projectItems: Record<string, any[]> = {};

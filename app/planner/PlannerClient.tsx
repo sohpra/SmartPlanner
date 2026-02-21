@@ -64,8 +64,7 @@ export default function PlannerPage() {
 
   const { tasks: weeklyTasks = [], isLoading: weeklyLoading } = useWeeklyTasks();
   const completions = useDailyCompletions(new Date(), updateTaskStatusLocally);
-  const { slots: revisionSlots, isLoading: revisionLoading } = useRevision();
-  const { capacityData, loading: capacityLoading, refresh: refreshCapacity } = usePlannerCapacity();
+  const { slots: revisionSlots, isLoading: revisionLoading, refresh: refreshRevision } = useRevision();  const { capacityData, loading: capacityLoading, refresh: refreshCapacity } = usePlannerCapacity();
 
   const activePlan = useMemo(() => {
     // 🎯 THE SHIELD: 
@@ -160,11 +159,18 @@ export default function PlannerPage() {
     fetchStatsAndHistory();
   }, [today, todayPlan?.totalPlanned]); 
 
-  const handleFullSync = async () => {
+ const handleFullSync = async () => {
     setIsSyncing(true);
     try {
-      await syncRevisionSlots();
-      window.location.reload(); 
+      const result = await syncRevisionSlots();
+      if (result.success) {
+        // 🎯 This forces the useRevision hook to re-fetch and updates the UI instantly
+        await completions.refresh(); // Refresh completions
+        await refreshRevision();     // From useRevision()
+        await refreshCapacity();     // From usePlannerCapacity()
+        
+        console.log("Roadmap successfully re-shuffled.");
+      }
     } catch (err) {
       console.error("Manual Sync Failed:", err);
     } finally {
@@ -308,20 +314,30 @@ export default function PlannerPage() {
           </div>
         </div>
 
-        {todayPlan.totalPlanned > todayPlan.baseCapacity + 15 && (
-          <div className="bg-amber-50 border border-amber-200 p-5 rounded-[2.5rem] flex flex-col sm:flex-row items-center justify-between gap-4 mb-8 animate-in slide-in-from-top-4 duration-500">
-            <div className="flex items-center gap-4">
-              <div className="h-10 w-10 rounded-2xl bg-amber-100 flex items-center justify-center text-amber-600 shadow-sm"><Clock className="w-5 h-5" /></div>
-              <div>
-                <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest italic">Capacity Mismatch</p>
-                <p className="text-xs font-bold text-amber-600/80">The roadmap is currently exceeding your set hours.</p>
-              </div>
+       <div className="flex items-center justify-between gap-4 mb-8">
+        <div className="flex items-center gap-4">
+          {todayPlan.totalPlanned > todayPlan.baseCapacity + 15 ? (
+            <div className="flex items-center gap-2 text-amber-600 bg-amber-50 px-4 py-2 rounded-2xl border border-amber-100">
+              <Clock className="w-4 h-4" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Over Capacity</span>
             </div>
-            <button onClick={handleFullSync} disabled={isSyncing} className="w-full sm:w-auto bg-amber-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-700 flex items-center justify-center gap-2 shadow-md shadow-amber-200 transition-all active:scale-95">
-              {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />} Re-Shuffle Roadmap
-            </button>
-          </div>
-        )}
+          ) : (
+            <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100">
+              <ShieldCheck className="w-4 h-4" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Plan Balanced</span>
+            </div>
+          )}
+        </div>
+
+        <button 
+          onClick={handleFullSync} 
+          disabled={isSyncing} 
+          className="bg-slate-900 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 flex items-center justify-center gap-2 shadow-xl transition-all active:scale-95 disabled:opacity-50"
+        >
+          {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />} 
+          Re-Shuffle Roadmap
+        </button>
+      </div>
 
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
           <div className="inline-flex rounded-xl bg-gray-100 p-1 w-full sm:w-auto">

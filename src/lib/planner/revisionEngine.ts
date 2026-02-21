@@ -65,22 +65,35 @@ const DEFAULT_PROFILE_BY_TYPE: Record<ExamType, RevisionProfile> = {
   Competitive: { slotMinutes: 60, maxSlotsPerDay: 2 },
 };
 
-/* --- Helpers --- */
+/* --- 🎯 STRICT DATE HELPERS (Kills Timezone Drift) --- */
+
 export function toDateOnly(dateStr: string): string {
-  return dateStr.slice(0, 10);
+  if (!dateStr) return "";
+  // Handles '2026-02-23T00:00:00Z' or '2026-02-23 00:00:00'
+  return dateStr.split('T')[0].split(' ')[0];
 }
 
-export function addDays(dateYYYYMMDD: string, days: number): string {
-  const cleanDate = dateYYYYMMDD.split('T')[0];
-  const d = new Date(cleanDate + "T00:00:00");
+export function addDays(dateStr: string, days: number): string {
+  const base = toDateOnly(dateStr);
+  const [year, month, day] = base.split('-').map(Number);
+  const d = new Date(year, month - 1, day);
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
 }
 
 export function daysBetween(from: string, to: string): number {
-  const a = new Date(from + "T00:00:00");
-  const b = new Date(to + "T00:00:00");
-  return Math.floor((b.getTime() - a.getTime()) / 86400000);
+  const aStr = toDateOnly(from);
+  const bStr = toDateOnly(to);
+  
+  const a = new Date(aStr + "T00:00:00");
+  const b = new Date(bStr + "T00:00:00");
+  
+  const diff = b.getTime() - a.getTime();
+  return Math.round(diff / 86400000);
 }
 
 const getDynamicLabel = (d: RevisionDemand, suffix: string) => {
@@ -89,7 +102,9 @@ const getDynamicLabel = (d: RevisionDemand, suffix: string) => {
   return `${d.subject}${suffix ? ' ' + suffix : ''}`;
 };
 
-export function buildRevisionDemand(exam: ExamInput): RevisionDemand | null {
+/* --- 🏗️ BUILD DEMAND (Demand-Aware) --- */
+
+export function buildRevisionDemand(exam: ExamInput, completedCount: number = 0): RevisionDemand | null {
   const examDate = toDateOnly(exam.date);
   const subject = (exam.subject ?? "Unknown").trim();
   const preparedness = Math.max(0, Math.min(100, exam.preparedness ?? 50));
@@ -99,6 +114,11 @@ export function buildRevisionDemand(exam: ExamInput): RevisionDemand | null {
   const totalMinutes = Math.round(base * multiplier);
 
   const profile = DEFAULT_PROFILE_BY_TYPE[exam.exam_type];
+  
+  // Calculate total slots needed initially, then subtract the work already done
+  const initialSlotsNeeded = Math.ceil(totalMinutes / profile.slotMinutes);
+  const remainingSlots = Math.max(0, initialSlotsNeeded - completedCount);
+
   return {
     examId: exam.id,
     examDate,
@@ -108,24 +128,31 @@ export function buildRevisionDemand(exam: ExamInput): RevisionDemand | null {
     profile,
     totalMinutes,
     slotMinutes: profile.slotMinutes,
-    remainingSlots: Math.ceil(totalMinutes / profile.slotMinutes),
+    remainingSlots: remainingSlots,
     competitive_exam_name: exam.competitive_exam_name,
     exam_board: exam.exam_board
   };
 }
 
-/* --- Main Engine --- */
+/* --- 🚀 MAIN ENGINE --- */
 
 export function planRevisionSlots(
   exams: ExamInput[],
-  opts: { startDate: string; numDays: number; capacityByDate: Record<string, number>; includeExamDay: boolean }
+  opts: { 
+    startDate: string; 
+    numDays: number; 
+    capacityByDate: Record<string, number>; 
+    includeExamDay: boolean;
+    completionMap?: Record<string, number>;
+  }
 ): RevisionPlanResult {
-  const windowDates = Array.from({ length: opts.numDays }, (_, i) => addDays(opts.startDate, i));
+  const startStr = toDateOnly(opts.startDate);
+  const windowDates = Array.from({ length: opts.numDays }, (_, i) => addDays(startStr, i));
 
   const demands = exams
-    .map(buildRevisionDemand)
-    .filter((d): d is RevisionDemand => d !== null && daysBetween(opts.startDate, d.examDate) >= 0)
-    .sort((a, b) => daysBetween(opts.startDate, a.examDate) - daysBetween(opts.startDate, b.examDate));
+    .map(exam => buildRevisionDemand(exam, opts.completionMap?.[exam.id] || 0))
+    .filter((d): d is RevisionDemand => d !== null && daysBetween(startStr, d.examDate) >= 0)
+    .sort((a, b) => daysBetween(startStr, a.examDate) - daysBetween(startStr, b.examDate));
 
   const days: DailyRevisionPlan[] = windowDates.map(date => ({
     date,
@@ -142,9 +169,7 @@ export function planRevisionSlots(
     if (targetDay) {
       const lockMinutes = d.examType === "Internal" ? 30 : 60;
       
-      // 🎯 HUSTLE PROTECTION:
-      // If the day is already full (because you pulled tasks forward),
-      // do NOT force a final push slot.
+      // Only force if space is available to respect Weekly/Homework rocks
       if (targetDay.remainingMinutes >= lockMinutes) {
         targetDay.slots.unshift({
           date: targetDay.date,
@@ -168,8 +193,10 @@ export function planRevisionSlots(
 
       for (const d of demands) {
         if (d.remainingSlots <= 0) continue;
+        
+        // 🛡️ HARD STOP: gap > 0 ensures no slots on or after exam day
         const gap = daysBetween(day.date, d.examDate);
-        if (gap <= 0) continue;
+        if (gap <= 0) continue; 
         
         if (day.remainingMinutes < d.slotMinutes) continue;
 
@@ -219,14 +246,11 @@ export function planRevisionSlots(
     }
   });
 
-  /* --- PHASE C: THE "NO CHOICE" OVERLOAD (Strict Crisis Only) --- */
+  /* --- PHASE C: THE "NO CHOICE" OVERLOAD (Crisis) --- */
   demands.filter(d => d.remainingSlots > 0).forEach(d => {
     const dayBefore = addDays(d.examDate, -1);
     const targetDay = days.find(day => day.date === dayBefore);
 
-    // 🎯 HUSTLE PROTECTION:
-    // Only force a crisis slot if the day isn't already 
-    // dangerously over-capacity (remainingMinutes > -30).
     if (targetDay && d.remainingSlots > 0 && targetDay.remainingMinutes > -30) {
       const forceMins = d.slotMinutes;
       targetDay.slots.push({
@@ -243,5 +267,10 @@ export function planRevisionSlots(
     }
   });
 
-  return { days, demands, unmet: demands.filter(d => d.remainingSlots > 0), notes: [] };
+  return { 
+    days, 
+    demands, 
+    unmet: demands.filter(d => d.remainingSlots > 0), 
+    notes: [] 
+  };
 }
