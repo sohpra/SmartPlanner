@@ -154,26 +154,40 @@ export function buildWeekPlan({
   }
 
   // 5. REVISION (Date-Normalization Fix)
+  // 5. REVISION (The "Hustle" Shield Fix)
   const revisionItems: Record<string, any[]> = {};
   windowDates.forEach(d => revisionItems[d] = []);
 
   const allSlots = (revisionSlots || []) as any[];
   const isSlotDone = (s: any) => s.is_completed === true || todayCompletionKeys.has(`revision:${s.id}`);
 
+  // Separate slots into categories
   const doneSlots = allSlots.filter(s => isSlotDone(s));
   const pendingSlots = allSlots.filter(s => !isSlotDone(s));
 
   doneSlots.forEach(s => {
     if (revisionItems[today]) {
       const mins = s.duration_minutes || s.slotMinutes || 30;
-      const scheduledDate = s.date ? String(s.date).split('T')[0] : null;
-      const isBonus = scheduledDate !== null && scheduledDate > today;
+      const label = s.label || s.displayName || s.description || "Revision";
+
+      // 🎯 THE CRITICAL SHIELD:
+      // A revision slot is a bonus if:
+      // 1. It explicitly contains the [Bonus] tag (from our Exams page pull)
+      // 2. OR its original date in the DB was in the future (backup check)
+      const isBonus = label.includes('[Bonus]') || (s.date && s.date > today);
 
       revisionItems[today].push({ 
-        ...s, id: s.id, type: 'revision', isDone: true, minutes: mins, isBonus,
-        name: s.label || s.displayName || "Revision",
+        ...s, 
+        id: s.id, 
+        type: 'revision', 
+        isDone: true, 
+        minutes: mins, 
+        isBonus: isBonus, // 👈 This prevents incrementing 'plannedTaskCount'
+        name: label,
         subject: s.subject || "Revision"
       });
+
+      // Only subtract from the day's capacity if it was part of the original requirement
       if (!isBonus) occupiedCap[today] += mins;
     }
   });
@@ -183,8 +197,12 @@ export function buildWeekPlan({
     if (assignedDate && assignedDate >= today && revisionItems[assignedDate]) {
       const mins = slot.slotMinutes || slot.duration_minutes || 30;
       revisionItems[assignedDate].push({
-        id: slot.id, type: 'revision', isDone: false, minutes: mins, isBonus: false,
-        name: slot.label || slot.displayName || "Revision",
+        id: slot.id, 
+        type: 'revision', 
+        isDone: false, 
+        minutes: mins, 
+        isBonus: false,
+        name: slot.label || slot.displayName || slot.description || "Revision",
         subject: slot.subject || "Revision",
         examId: slot.exam_id
       });
@@ -192,7 +210,7 @@ export function buildWeekPlan({
     }
   });
 
-  // 6. PROJECTS (120m Ceiling & Intent Fix)
+  // 6. PROJECTS (Stability & Denominator Fix)
   const projectItems: Record<string, any[]> = {};
   windowDates.forEach(d => projectItems[d] = []);
 
@@ -207,27 +225,45 @@ export function buildWeekPlan({
     const sortedProjects = [...(projects || [])].sort((a, b) => daysBetween(d, a.due_date) - daysBetween(d, b.due_date));
 
     for (const project of sortedProjects) {
-      if (project.status === 'completed' && !todayCompletionKeys.has(`project:${project.id}`)) continue;
-
       const isDoneToday = todayCompletionKeys.has(`project:${project.id}`);
+      if (project.status === 'completed' && !isDoneToday) continue;
+
       const remainingMinutes = project.estimated_minutes - projectProgress[project.id];
       const daysLeft = daysBetween(d, project.due_date);
 
-      // 🎯 INTENT ANCHOR: If done today, treat as planned for today.
+      // 🎯 STABILITY FIX: 
+      // If it's done today, it IS planned for today. No questions asked.
       const wasPlannedForToday = (d === today && isDoneToday) || (remainingMinutes > 0 && daysLeft >= 0);
 
       if (wasPlannedForToday) {
-        if (totalProjectMinsToday >= DAILY_PROJECT_CEILING && !isDoneToday) break;
-        if (spareForProjects <= 15 && !isDoneToday) break;
+        // If it's already done, we don't care about the 15m spare "threshold"
+        if (!isDoneToday) {
+           if (totalProjectMinsToday >= DAILY_PROJECT_CEILING) break;
+           if (spareForProjects < 15) break; // Strict 15m floor for NEW plans
+        }
 
         const maxSession = daysLeft <= 5 ? 90 : 60;
-        let allocation = isDoneToday && d === today ? 60 : Math.min(remainingMinutes, spareForProjects, maxSession, (DAILY_PROJECT_CEILING - totalProjectMinsToday));
+        
+        // 🎯 DYNAMIC ALLOCATION:
+        // If done today, we use a fixed 60m block (or whatever was logged). 
+        // This keeps the denominator stable.
+        let allocation = (isDoneToday && d === today) 
+          ? 60 
+          : Math.min(remainingMinutes, spareForProjects, maxSession, (DAILY_PROJECT_CEILING - totalProjectMinsToday));
 
         if (allocation >= 15 || (isDoneToday && d === today)) {
+          // A project is only a bonus if the day's base capacity was 0 (Holiday/Day Off)
           const isBonus = d === today && baseCapMap[d] === 0;
+          
           projectItems[d].push({
-            id: project.id, projectId: project.id, type: 'project', isDone: isDoneToday && d === today,
-            minutes: allocation, isBonus, name: `Project: ${project.name}`, subject: project.subject || "Project"
+            id: project.id, 
+            projectId: project.id, 
+            type: 'project', 
+            isDone: isDoneToday && d === today,
+            minutes: allocation, 
+            isBonus, 
+            name: `Project: ${project.name}`, 
+            subject: project.subject || "Project"
           });
 
           if (!isBonus) {
@@ -242,13 +278,44 @@ export function buildWeekPlan({
   });
 
   // 7. FINAL ASSEMBLY
+// 7. FINAL ASSEMBLY (The Absolute ID Anchor)
   const days: DayPlan[] = windowDates.map((d: string) => {
-    const allItems = [...(weeklyItems[d] || []), ...(homeworkItems[d] || []), ...(revisionItems[d] || []), ...(projectItems[d] || [])];
+    // 1. Collect everything the engines produced for this day
+    const rawItems = [
+      ...(weeklyItems[d] || []), 
+      ...(homeworkItems[d] || []), 
+      ...(revisionItems[d] || []), 
+      ...(projectItems[d] || [])
+    ];
     
-    const dayTotalPlannedMinutes = allItems.filter(i => !i.isBonus).reduce((sum, i) => sum + (i.minutes || 0), 0);
-    const dayTotalDoneMinutes = allItems.filter(i => i.isDone).reduce((sum, i) => sum + (i.minutes || 0), 0);
-    const plannedCount = allItems.filter(i => !i.isBonus).length;
-    const completedCount = allItems.filter(i => i.isDone).length;
+    // 2. 🎯 THE UNIQUE MAP (Prevents Double-Counting)
+    // This ensures that even if the engine creates a "Ghost" of a 1hr slot,
+    // we only look at that slot ID once.
+    const uniqueMap = new Map();
+    rawItems.forEach(item => {
+      const existing = uniqueMap.get(item.id);
+      // Priority: If we have a duplicate, keep the one that is "Done"
+      if (!existing || (!existing.isDone && item.isDone)) {
+        uniqueMap.set(item.id, item);
+      }
+    });
+
+    const finalItems = Array.from(uniqueMap.values());
+
+    // 3. 🎯 THE STABLE DENOMINATOR
+    // We only count items toward the "Goal" if they aren't marked as Bonus.
+    const dayTotalPlannedMinutes = finalItems
+      .filter(i => !i.isBonus)
+      .reduce((sum, i) => sum + (i.minutes || 0), 0);
+
+    const plannedCount = finalItems.filter(i => !i.isBonus).length;
+
+    // 4. 🎯 THE STABLE NUMERATOR
+    const dayTotalDoneMinutes = finalItems
+      .filter(i => i.isDone)
+      .reduce((sum, i) => sum + (i.minutes || 0), 0);
+      
+    const completedCount = finalItems.filter(i => i.isDone).length;
 
     return {
       date: d,

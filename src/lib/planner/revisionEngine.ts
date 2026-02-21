@@ -60,9 +60,9 @@ const BASE_MINUTES_BY_TYPE: Record<ExamType, number> = {
 };
 
 const DEFAULT_PROFILE_BY_TYPE: Record<ExamType, RevisionProfile> = {
-  Internal: { slotMinutes: 30, maxSlotsPerDay: 1 }, // Cap internals at 1 per day
-  Board: { slotMinutes: 45, maxSlotsPerDay: 2 },   // Cap boards at 2 per day
-  Competitive: { slotMinutes: 60, maxSlotsPerDay: 2 }, // Cap competitive at 2 per day
+  Internal: { slotMinutes: 30, maxSlotsPerDay: 1 },
+  Board: { slotMinutes: 45, maxSlotsPerDay: 2 },
+  Competitive: { slotMinutes: 60, maxSlotsPerDay: 2 },
 };
 
 /* --- Helpers --- */
@@ -116,8 +116,6 @@ export function buildRevisionDemand(exam: ExamInput): RevisionDemand | null {
 
 /* --- Main Engine --- */
 
-/* --- Main Engine --- */
-
 export function planRevisionSlots(
   exams: ExamInput[],
   opts: { startDate: string; numDays: number; capacityByDate: Record<string, number>; includeExamDay: boolean }
@@ -144,7 +142,9 @@ export function planRevisionSlots(
     if (targetDay) {
       const lockMinutes = d.examType === "Internal" ? 30 : 60;
       
-      // Respect capacity: Don't kill "Today" if it's already full of homework
+      // 🎯 HUSTLE PROTECTION:
+      // If the day is already full (because you pulled tasks forward),
+      // do NOT force a final push slot.
       if (targetDay.remainingMinutes >= lockMinutes) {
         targetDay.slots.unshift({
           date: targetDay.date,
@@ -162,7 +162,6 @@ export function planRevisionSlots(
   });
 
   /* --- PHASE A: POLITE INTERLEAVING --- */
-  // We do two passes to spread subjects out
   for (let pass = 1; pass <= 2; pass++) {
     for (const day of days) {
       if (day.remainingMinutes <= 0) continue;
@@ -172,12 +171,9 @@ export function planRevisionSlots(
         const gap = daysBetween(day.date, d.examDate);
         if (gap <= 0) continue;
         
-        // Don't overfill today in polite mode
         if (day.remainingMinutes < d.slotMinutes) continue;
 
         const subjectCount = day.slots.filter(s => s.subject === d.subject).length;
-        
-        // Internals: 1 per day. Boards/Competitive: 2 per day in pass 2.
         const limit = d.examType === "Internal" ? 1 : (pass === 1 ? 1 : 2);
 
         if (subjectCount < limit) {
@@ -197,8 +193,7 @@ export function planRevisionSlots(
     }
   }
 
-  /* --- PHASE B: EMERGENCY OVERFLOW (Capacity Respecting) --- */
-  // If we have slots left, we try to fit them in the 4 days before, but still respect 0 gap.
+  /* --- PHASE B: EMERGENCY OVERFLOW --- */
   demands.filter(d => d.remainingSlots > 0).forEach(d => {
     const emergencyWindow = days.filter(day => {
       const gap = daysBetween(day.date, d.examDate);
@@ -207,7 +202,7 @@ export function planRevisionSlots(
 
     for (const day of emergencyWindow) {
       if (d.remainingSlots <= 0) break;
-      if (day.remainingMinutes < d.slotMinutes) continue; // 🎯 THE FIX: Respect the bottom of the budget
+      if (day.remainingMinutes < d.slotMinutes) continue;
 
       day.slots.push({
         date: day.date,
@@ -225,13 +220,14 @@ export function planRevisionSlots(
   });
 
   /* --- PHASE C: THE "NO CHOICE" OVERLOAD (Strict Crisis Only) --- */
-  // Only if we reach the day before and there is literally NO other time.
   demands.filter(d => d.remainingSlots > 0).forEach(d => {
     const dayBefore = addDays(d.examDate, -1);
     const targetDay = days.find(day => day.date === dayBefore);
 
-    if (targetDay && d.remainingSlots > 0) {
-      // Limit force-feeding to 1 extra slot so we don't have 10 slots on one day
+    // 🎯 HUSTLE PROTECTION:
+    // Only force a crisis slot if the day isn't already 
+    // dangerously over-capacity (remainingMinutes > -30).
+    if (targetDay && d.remainingSlots > 0 && targetDay.remainingMinutes > -30) {
       const forceMins = d.slotMinutes;
       targetDay.slots.push({
         date: targetDay.date,

@@ -35,7 +35,10 @@ export default function PlannerPage() {
   const urlView = searchParams.get("view");
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [view, setView] = useState<"daily" | "weekly" | "monthly">("daily");
+  
   const lastCelebratedCount = useRef(0);
+  const lastSyncedMins = useRef<number | null>(null); // 🎯 Prevents double-syncing the same total
+  
   const [isHydrating, setIsHydrating] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   
@@ -94,15 +97,18 @@ export default function PlannerPage() {
   
   // 🚀 UNIFIED DISPLAY CALCULATION
   const displayCompletedMins = useMemo(() => {
-    const base = todayPlan?.totalCompleted || 0;
-    // We sum Task Completion + Local Session Clicks + DB Historical Bonus
-    return base + localBonusMins + dbBonusMins;
-  }, [todayPlan?.totalCompleted, localBonusMins, dbBonusMins]);
+    const planBase = todayPlan?.totalCompleted || 0;
+      return planBase + localBonusMins;
+  }, [todayPlan?.totalCompleted, localBonusMins]);
 
   const isSecured = todayPlan ? todayPlan.completedTaskCount >= todayPlan.plannedTaskCount : false;
   const isElite = todayPlan && hasTasks ? (
+    // 🎯 Higher priority: Did they actually finish more items than planned?
     todayPlan.completedTaskCount > todayPlan.plannedTaskCount || 
-    displayCompletedMins >= (todayPlan.totalPlanned + 15)
+    
+    // 🎯 Minute check: Only if they are substantially over the plan
+    // and the mission is already secured (prevents elite triggering mid-day)
+    (isSecured && displayCompletedMins >= (todayPlan.totalPlanned + 15))
   ) : false;
 
   const bonusCount = todayPlan && isElite ? todayPlan.completedTaskCount - todayPlan.plannedTaskCount : 0;
@@ -113,37 +119,36 @@ export default function PlannerPage() {
     else setView("daily");
   }, [urlView]);
 
-  // 🎯 FETCH LIVE STATS & HYDRATE BONUS (STATIONARY BASELINE)
+  // 🎯 FETCH LIVE STATS & HYDRATE BONUS
   useEffect(() => {
     const fetchStatsAndHistory = async () => {
       if (!todayPlan) return;
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 1. Fetch Stats
-      const { data: statsData } = await supabase.from('planner_stats')
-        .select('current_streak, longest_streak, elite_count, lifetime_bonus_mins')
-        .eq('user_id', user.id).single();
+      const { data: statsData } = await supabase.from('planner_stats').select('*').eq('user_id', user.id).single();
       if (statsData) setStats(statsData);
 
-      // 2. Hydrate Bonus
-      const { data: todayData } = await supabase.from('daily_stats').select('mins_completed')
-        .eq('user_id', user.id).eq('date', today).single();
+      const { data: todayData } = await supabase
+        .from('daily_stats')
+        .select('mins_completed, mins_planned')
+        .eq('user_id', user.id)
+        .eq('date', today)
+        .single();
 
       if (todayData) {
-        // Compare DB total against the PLAN total to find the persistent gap
-        const persistentBonus = todayData.mins_completed - todayPlan.totalPlanned;
-        if (persistentBonus > 0) {
-          setDbBonusMins(persistentBonus);
-          setLocalBonusMins(0); // Hand-off session clicks to DB history
-        }
+        // Calculate bonus relative to today's planned total
+        const actualBonus = todayData.mins_completed - todayPlan.totalPlanned;
+        setDbBonusMins(Math.max(0, actualBonus));
+        setLocalBonusMins(0); 
       }
       setIsHydrating(false);
     };
-    fetchStatsAndHistory();
-  }, [completions.allCompletions, today, todayPlan?.totalPlanned]);
 
-  // 🚀 MANUAL RESHUFFLE BRIDGE
+    fetchStatsAndHistory();
+  }, [today, todayPlan?.totalPlanned]); 
+
   const handleFullSync = async () => {
     setIsSyncing(true);
     try {
@@ -156,43 +161,83 @@ export default function PlannerPage() {
     }
   };
 
-  const handleBonusEffort = async (minutes: number) => {
-    if (!todayPlan) return;
-    setLocalBonusMins(prev => prev + minutes);
-    confetti({ particleCount: 40, spread: 50, origin: { y: 0.8 }, colors: ['#a855f7', '#d946ef'] });
+// 🎯 1. THE ACTION: Just updates local state to trigger the UI and the Sync effect
+  const handleBonusEffort = (minutes: number) => {
+    // 🛡️ Safety: Don't allow logging while data is unstable
+    if (!todayPlan || isHydrating) return;
 
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      await supabase.rpc('sync_daily_stats', {
-        target_user_id: user.id, is_mission_secured: isSecured, is_elite_day: true,
-        planned_count: todayPlan.plannedTaskCount, completed_count: todayPlan.completedTaskCount,
-        planned_mins: todayPlan.totalPlanned, completed_mins: displayCompletedMins + minutes
-      });
-    } catch (err) { console.error("Bonus Error:", err); }
+    // 🚀 Instant UI Update
+    setLocalBonusMins(prev => prev + minutes);
+    
+    // 🎉 Celebration
+    confetti({ 
+      particleCount: 40, 
+      spread: 50, 
+      origin: { y: 0.8 }, 
+      colors: ['#a855f7', '#d946ef'] 
+    });
+
+    // 🎯 Note: The actual Supabase RPC call is now handled exclusively 
+    // by the syncStats useEffect below to prevent "Double-Tapping".
   };
 
-  // Auto sync stats to DB
+  // 🎯 2. THE SYNC: One single "Pipe" to the database
   useEffect(() => {
-    if (!todayPlan || isHydrating) return;    
+    // THE IRON GATE: Only sync if we have a stable plan and are done hydrating
+    if (isHydrating || !stats || !todayPlan || todayPlan.plannedTaskCount === 0) return;
+
     const syncStats = async () => {
+      // THE TRUTH: Current Plan Completion + Session Bonus Clicks
+      const currentTaskMins = todayPlan.totalCompleted || 0;
+      const totalToSave = currentTaskMins + localBonusMins;
+
+      // STABILITY CHECK: Don't hit the DB if the value is the same as the last sync
+      if (totalToSave === lastSyncedMins.current) return;
+
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
+
+        // OVERWRITE SYNC: Sends the absolute total to the database
         await supabase.rpc('sync_daily_stats', {
-          target_user_id: user.id, is_mission_secured: isSecured, is_elite_day: isElite,
-          planned_count: todayPlan.plannedTaskCount, completed_count: todayPlan.completedTaskCount,
-          planned_mins: todayPlan.totalPlanned, completed_mins: displayCompletedMins   
+          target_user_id: user.id, 
+          is_mission_secured: isSecured, 
+          is_elite_day: isElite,
+          planned_count: todayPlan.plannedTaskCount, 
+          completed_count: todayPlan.completedTaskCount,
+          planned_mins: todayPlan.totalPlanned, 
+          completed_mins: totalToSave   
         });
+
+        // Memorize this total to prevent redundant calls
+        lastSyncedMins.current = totalToSave;
+
+        // Pull fresh stats (streak, elite count)
         const { data: newStats } = await supabase.from('planner_stats')
           .select('current_streak, longest_streak, elite_count, lifetime_bonus_mins')
           .eq('user_id', user.id).single();
         if (newStats) setStats(newStats);
-      } catch (err) { console.error("Sync Error:", err); }
+        
+      } catch (err) { 
+        console.error("Sync Error:", err); 
+      }
     };
-    syncStats();
-  }, [todayPlan?.completedTaskCount, todayPlan?.plannedTaskCount, isSecured, isElite, displayCompletedMins, isHydrating]);
 
+    // DEBOUNCE: Wait 1.5 seconds after the last change before committing
+    const timer = setTimeout(syncStats, 1500);
+    return () => clearTimeout(timer);
+
+  }, [
+    todayPlan?.completedTaskCount, 
+    todayPlan?.totalCompleted, 
+    todayPlan?.plannedTaskCount, 
+    isSecured, 
+    isElite, 
+    isHydrating, 
+    stats, 
+    localBonusMins
+  ]);
+  
   // 🎉 Celebration Logic
   useEffect(() => {
     if (!todayPlan) return;
@@ -229,7 +274,6 @@ export default function PlannerPage() {
       <main className="mx-auto max-w-[1400px] px-4 py-4 md:py-8 space-y-4 md:space-y-6">
         <DashboardHeader />
 
-        {/* --- LIFETIME HERO BAR --- */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <StatCard icon={<ShieldCheck className="w-6 h-6" />} label="Current Streak" val={`${stats?.current_streak || 0} Days`} color="emerald" />
           <StatCard icon={<Rocket className="w-6 h-6" />} label="Longest Streak" val={`${stats?.longest_streak || 0} Days`} color="orange" />
@@ -253,7 +297,6 @@ export default function PlannerPage() {
           </div>
         </div>
 
-        {/* ⚠️ CAPACITY OVERLOAD WARNING */}
         {todayPlan.totalPlanned > todayPlan.baseCapacity + 15 && (
           <div className="bg-amber-50 border border-amber-200 p-5 rounded-[2.5rem] flex flex-col sm:flex-row items-center justify-between gap-4 mb-8 animate-in slide-in-from-top-4 duration-500">
             <div className="flex items-center gap-4">
@@ -269,7 +312,6 @@ export default function PlannerPage() {
           </div>
         )}
 
-        {/* View Switcher */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
           <div className="inline-flex rounded-xl bg-gray-100 p-1 w-full sm:w-auto">
             {["daily", "weekly", "monthly"].map((v) => (
@@ -289,23 +331,11 @@ export default function PlannerPage() {
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-1">Active Window</p>
                     <h2 className="text-3xl font-black text-gray-900 italic tracking-tighter">Today</h2>
                   </div>
-                  <div className="flex flex-wrap items-center sm:justify-end gap-3">
-                    {(() => {
-                      const overage = todayPlan.totalPlanned - todayPlan.baseCapacity;
-                      const todayLabel = capacityData?.labels[today];
-                      const elements = [];
-                      if (todayLabel) elements.push(<div key="override" className="bg-blue-600 px-3 py-1.5 rounded-full flex items-center gap-2 text-white text-[10px] font-black uppercase italic"><Calendar className="w-3 h-3" />{todayLabel} Mode</div>);
-                      if (overage >= 15) elements.push(<div key="overload" className="bg-red-50 border border-red-100 px-3 py-1.5 rounded-full text-red-700 text-[10px] font-black uppercase italic">Overload +{overage}m</div>);
-                      return elements;
-                    })()}
-                  </div>
                 </div>
 
-                {/* --- METRICS --- */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <MetricCard title="Mission Progress" val={todayPlan.completedTaskCount} total={todayPlan.plannedTaskCount} isElite={isElite} isSecured={isSecured} bonusCount={bonusCount} />
                   
-                  {/* Workload Progress */}
                   <div className={`p-6 rounded-[2.5rem] border transition-all duration-500 ${isElite ? 'bg-purple-50 border-purple-200 shadow-lg' : isSecured ? 'border-emerald-100 bg-emerald-50/10' : 'bg-white border-gray-100 shadow-sm'}`}>
                     <div className="flex justify-between items-start mb-2">
                       <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Work Load</p>

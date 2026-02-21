@@ -3,17 +3,18 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase/client";
 
-
 export function useRevision() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-const fetchRevision = useCallback(async () => {
+  const fetchRevision = useCallback(async () => {
     try {
+      setLoading(true);
       const { data, error } = await supabase
         .from("revision_slots")
         .select(`
           id, 
+          exam_id,
           date, 
           duration_minutes, 
           description, 
@@ -29,19 +30,19 @@ const fetchRevision = useCallback(async () => {
         `);
 
       if (error) {
-        // Log the actual string message from Supabase
         console.error("❌ Supabase Error:", error.message);
         throw error;
       }
 
-
       const mapped = data?.map((row: any) => ({
           id: row.id,
+          exam_id: row.exam_id, // 🎯 Ensure exam_id is mapped for the 'Get Ahead' logic
           date: row.date,
           duration_minutes: row.duration_minutes,
-          displayName: row.description, // Matches 'description' in your SQL
+          displayName: row.description,
           subject: row.exam?.subject,
-          isDone: row.is_completed, // Matches 'is_completed' in your SQL
+          is_completed: row.is_completed, // Matches your ExamsPage usage
+          isDone: row.is_completed, 
           exam: row.exam
       }));
 
@@ -57,5 +58,10 @@ const fetchRevision = useCallback(async () => {
     fetchRevision();
   }, [fetchRevision]);
 
-  return { slots: tasks, isLoading: loading };
+  // 🎯 Export 'fetchRevision' as 'refresh' to clear the TS error in ExamsPage
+  return { 
+    slots: tasks, 
+    isLoading: loading, 
+    refresh: fetchRevision 
+  };
 }

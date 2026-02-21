@@ -1,10 +1,13 @@
 import { supabase } from "@/lib/supabase/client";
 import { planRevisionSlots, ExamInput, addDays, daysBetween } from "./revisionEngine";
 
-// 🎯 Fixes TS errors by defining what a Slot Row looks like
+// 🎯 Interface to clear TS errors on the Supabase response
 interface RevisionSlotRow {
+  id: string;
   duration_minutes: number;
   is_completed: boolean;
+  date: string;
+  description: string;
 }
 
 export async function syncRevisionSlots() {
@@ -21,7 +24,7 @@ export async function syncRevisionSlots() {
       supabase.from("deadline_tasks").select("*, is_fixed, scheduled_date").or(`status.eq.active,status.eq.completed`).gte("due_date", today), 
       supabase.from("planner_settings").select("*").eq("user_id", user.id),
       supabase.from("planner_overrides").select("*").eq("user_id", user.id).gte("date", today),
-      supabase.from("revision_slots").select("duration_minutes, is_completed").match({ user_id: user.id, date: today }),
+      supabase.from("revision_slots").select("id, duration_minutes, is_completed, date, description").match({ user_id: user.id, date: today }),
       supabase.from("daily_completions").select("source_id, source_type").eq("user_id", user.id).eq("date", today)
     ]);
 
@@ -32,9 +35,16 @@ export async function syncRevisionSlots() {
     const overridesRows = overridesRes.data || [];
     const completionsToday = completionsTodayRes.data || [];
     
-    // 🎯 TS Fix: Cast the data so TypeScript knows these properties exist
     const slotsToday = (allSlotsToday.data || []) as RevisionSlotRow[];
     const hasAnySlotsToday = slotsToday.length > 0;
+
+    // 🎯 SHIELD LOGIC: Is today already finished?
+    const allTodayDone = slotsToday.length > 0 && slotsToday.every(s => s.is_completed);
+    const missionAlreadySecured = hasAnySlotsToday && allTodayDone;
+
+    // 🎯 THE GHOST SLOT FIX: Count minutes ALREADY assigned to today's revision
+    // This includes any slots Rehan/Sohini just "Pulled Forward"
+    const revisionMinsAlreadyToday = slotsToday.reduce((sum, s) => sum + (s.duration_minutes || 0), 0);
 
     // 2. MAP CAPACITY
     const weeklyPattern: Record<number, number> = {};
@@ -46,15 +56,19 @@ export async function syncRevisionSlots() {
     const engineCapacityMap: Record<string, number> = {};
     const occupiedByRocks: Record<string, number> = {};
 
-    // 3. CALCULATE "ROCK" LOAD
+    // 3. CALCULATE "ROCK" LOAD (Recurring/Weekly)
     windowDates.forEach(d => {
       const dow = new Date(d + "T00:00:00").getDay();
-      const budget = dateOverrides[d] ?? weeklyPattern[dow] ?? 150;
+      let budget = dateOverrides[d] ?? weeklyPattern[dow] ?? 150;
       
+      // 🛡️ HARD SEAL: If mission is secured, today's budget is 0
+      if (d === today && missionAlreadySecured) {
+        budget = 0;
+      }
+
       let nonRevisionLoad = 0;
       if (d === today) {
         const completedRecurringIds = new Set(completionsToday.filter(c => c.source_type === 'recurring_task').map(c => c.source_id));
-        
         nonRevisionLoad = recurringTasks
           .filter((t: any) => Number(t.day_of_week) === dow || completedRecurringIds.has(t.id))
           .reduce((sum, t) => sum + (t.duration_minutes || 0), 0);
@@ -68,7 +82,7 @@ export async function syncRevisionSlots() {
       engineCapacityMap[d] = budget;
     });
 
-    // 4. HOMEWORK PLACEMENT & WEIGHTING
+    // 4. HOMEWORK PLACEMENT
     const tasksToUpdate: { id: string, scheduled_date: string }[] = [];
     const occupiedByHw: Record<string, number> = {};
     windowDates.forEach(d => occupiedByHw[d] = 0);
@@ -78,9 +92,6 @@ export async function syncRevisionSlots() {
       return daysBetween(today, a.due_date) - daysBetween(today, b.due_date);
     });
 
-    // 🎯 SHIELD LOGIC: Start placement from Tomorrow if Today is secured
-    const allTodayDone = slotsToday.length > 0 && slotsToday.every(s => s.is_completed);
-    const missionAlreadySecured = hasAnySlotsToday && allTodayDone;
     const searchStartDate = missionAlreadySecured ? tomorrow : today;
 
     for (const task of sortedHw) {
@@ -102,16 +113,13 @@ export async function syncRevisionSlots() {
 
       if (!placedDate) {
         const dayBeforeDeadline = addDays(task.due_date, -1);
-        const possibleDays = windowDates.filter(date => 
-          date >= searchStartDate && date <= dayBeforeDeadline
-        );
+        const possibleDays = windowDates.filter(date => date >= searchStartDate && date <= dayBeforeDeadline);
 
         for (const d of possibleDays) {
           if (occupiedByRocks[d] + occupiedByHw[d] + taskMins + 45 <= engineCapacityMap[d]) {
             placedDate = d; break;
           }
         }
-        
         if (!placedDate) {
           for (const d of possibleDays) {
             if (occupiedByRocks[d] + occupiedByHw[d] + taskMins <= engineCapacityMap[d]) {
@@ -119,7 +127,6 @@ export async function syncRevisionSlots() {
             }
           }
         }
-
         if (!placedDate) {
           placedDate = (dayBeforeDeadline >= searchStartDate) ? searchStartDate : today;
         }
@@ -134,7 +141,9 @@ export async function syncRevisionSlots() {
 
     // 5. UPDATE DB & PREP REVISION GAPS
     windowDates.forEach(d => {
-      engineCapacityMap[d] = Math.max(0, engineCapacityMap[d] - occupiedByRocks[d] - occupiedByHw[d]);
+      // 🎯 THE GHOST FIX: Subtract what's already in the DB for today to prevent double-scheduling
+      const existingRevisionMins = (d === today) ? revisionMinsAlreadyToday : 0;
+      engineCapacityMap[d] = Math.max(0, engineCapacityMap[d] - occupiedByRocks[d] - occupiedByHw[d] - existingRevisionMins);
     });
 
     if (tasksToUpdate.length > 0) {
@@ -143,7 +152,8 @@ export async function syncRevisionSlots() {
       ));
     }
 
-    // --- 6. THE IRON SHIELD EVALUATION ---
+    // 6. THE IRON SHIELD EVALUATION
+    // 🎯 6. THE IRON SHIELD EVALUATION (Deterministic Fix)
     const virtualPlanFull = planRevisionSlots(exams, {
       startDate: today,
       numDays: 60,
@@ -151,29 +161,23 @@ export async function syncRevisionSlots() {
       includeExamDay: false
     });
 
-    const totalMinsNeeded = virtualPlanFull.days.reduce((sum, d) => sum + d.slots.reduce((s, slot) => s + slot.slotMinutes, 0), 0);
-    const futureCapacity = windowDates.filter(d => d > today).reduce((sum, d) => sum + engineCapacityMap[d], 0);
-    const isCrisisMode = totalMinsNeeded > futureCapacity;
-
-    const totalTodayBudget = dateOverrides[today] ?? weeklyPattern[new Date(today).getDay()] ?? 150;
-
-    // 🛡️ SHIELD RULES: Determine if we move today's non-completed slots
-    const hasLittleCapacityLeft = engineCapacityMap[today] < 90;
-    const isDayStarted = engineCapacityMap[today] < (totalTodayBudget * 0.75);
-
+    // Determine if we should lock today's revision slots
+    // 1. Mission is secured (everything done)
+    // 2. ANY revision slot has been completed (the day has started)
+    const anyRevisionDone = slotsToday.some(s => s.is_completed);
+    
     let syncFromDate = today;
-
-    if (!isCrisisMode) {
-      if (hasAnySlotsToday || hasLittleCapacityLeft || isDayStarted || missionAlreadySecured) {
-        syncFromDate = tomorrow;
-      }
+    
+    if (missionAlreadySecured || anyRevisionDone) {
+      syncFromDate = tomorrow;
     }
 
-    // 7. ATOMIC DB SYNC
+    // 🎯 7. ATOMIC DB SYNC & CLEANUP
+    // Use the syncFromDate to ensure we never delete completed work
     await supabase.from("revision_slots")
       .delete()
       .match({ user_id: user.id, is_completed: false })
-      .gte("date", syncFromDate);
+      .gte("date", syncFromDate); // 👈 Changed from deleteFromDate to syncFromDate
 
     const rowsToInsert = virtualPlanFull.days
       .filter(day => day.date >= syncFromDate)
