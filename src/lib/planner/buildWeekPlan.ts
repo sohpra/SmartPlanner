@@ -1,261 +1,283 @@
-import { addDays, daysBetween } from "./revisionEngine";
+// ─────────────────────────────────────────────────────────────────────────────
+// buildWeekPlan.ts
+//
+// Changes from original:
+//   - Homework placement delegated to shared scheduleHomework() — no duplication
+//   - todayIsSecured calculation fixed (was comparing apples to oranges)
+//   - isBonus logic centralised into a single helper
+//   - slot_type and is_fixed passed through to revision PlanItems so the UI
+//     can render practice papers differently from standard sessions
+//   - Dead comment blocks removed
+//   - Types imported from shared types.ts
+// ─────────────────────────────────────────────────────────────────────────────
 
-export type DayPlan = {
-  date: string;
-  weekly: { minutes: number; items: any[] };
-  homework: { minutes: number; actualCompletedMinutes: number; items: any[] };
-  revision: { minutes: number; items: any[] };
-  projects: { minutes: number; items: any[] };
-  baseCapacity: number;
-  totalPlanned: number;   
-  totalCompleted: number; 
-  plannedTaskCount: number;   
-  completedTaskCount: number; 
-  spare: number;
-};
+import { addDays, daysBetween, buildDateWindow, toDateOnly } from "./dateUtils";
+import { scheduleHomework } from "./homeworkScheduler";
+import type {
+  DayPlan,
+  WeekPlan,
+  PlanItem,
+  HomeworkTask,
+} from "./types";
 
-export type WeekPlan = { days: DayPlan[] };
+// ─── isBonus helper ───────────────────────────────────────────────────────────
+
+/**
+ * An item is a bonus when the day it lands on has zero base capacity
+ * (holiday / day off) — meaning anything done is above and beyond.
+ */
+function isItemBonus(itemDate: string, today: string, baseCapMap: Record<string, number>): boolean {
+  return itemDate === today && (baseCapMap[today] ?? 0) === 0;
+}
+
+// ─── Main function ────────────────────────────────────────────────────────────
 
 export function buildWeekPlan({
   today,
   numDays = 30,
   weeklyTasks,
   deadlines,
-  exams,
   projects,
   completions = [],
   capacityData,
   revisionSlots = [],
 }: any): WeekPlan {
-  const windowDates = Array.from({ length: numDays }, (_, i) => addDays(today, i));
-  
-  // 1. HARMONIZE IDs & COMPLETIONS
+  const windowDates = buildDateWindow(today, numDays);
+
+  // ── 1. COMPLETION KEYS ──────────────────────────────────────────────────────
   const todayCompletionKeys = new Set<string>();
   const historicalIds = new Set<string>();
-  
-  (completions || []).forEach((c: any) => {
+
+  (completions as any[]).forEach((c) => {
     const key = `${c.source_type}:${c.source_id}`;
     if (c.date === today) {
       todayCompletionKeys.add(key);
-      todayCompletionKeys.add(c.source_id); 
+      todayCompletionKeys.add(c.source_id);
     } else if (c.date < today) {
       historicalIds.add(c.source_id);
     }
   });
 
-  // 2. CAPACITY MAP
+  // ── 2. BASE CAPACITY MAP ────────────────────────────────────────────────────
   const baseCapMap: Record<string, number> = {};
-  windowDates.forEach(d => {
+  windowDates.forEach((d) => {
     const dow = new Date(d + "T00:00:00").getDay();
-    let budget = 150; 
-    if (capacityData?.weeklyPattern?.[dow] !== undefined) budget = capacityData.weeklyPattern[dow];
-    if (capacityData?.dateOverrides?.[d] !== undefined) budget = capacityData.dateOverrides[d];
+    let budget = 150;
+    if (capacityData?.weeklyPattern?.[dow] !== undefined)
+      budget = capacityData.weeklyPattern[dow];
+    if (capacityData?.dateOverrides?.[d] !== undefined)
+      budget = capacityData.dateOverrides[d];
     baseCapMap[d] = budget;
   });
 
-  // 3. WEEKLY ITEMS
-  const weeklyItems: Record<string, any[]> = {};
-  windowDates.forEach(d => {
+  // ── 3. WEEKLY TASKS ─────────────────────────────────────────────────────────
+  const weeklyItems: Record<string, PlanItem[]> = {};
+  windowDates.forEach((d) => {
     const dow = new Date(d + "T00:00:00").getDay();
-    weeklyItems[d] = (weeklyTasks || [])
-      .filter((t: any) => t.day_of_week === dow && t.name?.trim())
-      .map((t: any) => ({ 
-        id: t.id, 
-        name: t.name, 
-        minutes: t.duration_minutes,
-        isDone: todayCompletionKeys.has(`weekly_task:${t.id}`),
-        type: 'weekly_task' 
-      }));
+    weeklyItems[d] = ((weeklyTasks ?? []) as any[])
+      .filter((t) => t.day_of_week === dow && t.name?.trim())
+      .map(
+        (t): PlanItem => ({
+          id:      t.id,
+          name:    t.name,
+          minutes: t.duration_minutes,
+          isDone:  todayCompletionKeys.has(`weekly_task:${t.id}`),
+          isBonus: false,
+          type:    "weekly_task",
+          subject: t.subject || "",
+        })
+      );
   });
 
-// 1. HARMONIZE IDs & COMPLETIONS (Keep as is)
-  // 2. CAPACITY MAP (Keep as is)
-  // 3. WEEKLY ITEMS (Keep as is)
+  // ── 4. REVISION ITEMS (placed BEFORE homework to reserve capacity) ──────────
+  const revisionItems: Record<string, PlanItem[]> = {};
+  const occupiedCap: Record<string, number> = {};
 
-  // 🎯 4. REVISION 
-  // 🎯 4. REVISION (Processing BEFORE Homework)
-  const revisionItems: Record<string, any[]> = {};
-  const occupiedCap: Record<string, number> = {}; 
-  
-  windowDates.forEach(d => {
+  windowDates.forEach((d) => {
     revisionItems[d] = [];
-    occupiedCap[d] = (weeklyItems[d] || []).reduce((sum, i) => sum + (i.minutes || 0), 0);
+    occupiedCap[d] = (weeklyItems[d] ?? []).reduce(
+      (sum, i) => sum + (i.minutes || 0),
+      0
+    );
   });
-  
-  const processedRevisionIds = new Set();
-  (revisionSlots || []).forEach((slot: any) => {
+
+  const processedRevisionIds = new Set<string>();
+
+  ((revisionSlots ?? []) as any[]).forEach((slot) => {
     if (processedRevisionIds.has(slot.id)) return;
-    
-    // Strict date normalization
-    const assignedDate = slot.date ? String(slot.date).split('T')[0].split(' ')[0] : null;
-    
-    if (assignedDate && revisionItems[assignedDate]) {
-      const isDone = slot.is_completed === true || todayCompletionKeys.has(`revision:${slot.id}`);
-      const mins = slot.duration_minutes || 30;
-      const examName = slot.displayName || slot.description || "Revision Session";
-      const isBonus = (assignedDate === today && slot.date > today) || examName.includes('[Bonus]');
 
-      revisionItems[assignedDate].push({
-        id: slot.id, type: 'revision', isDone, minutes: mins, isBonus,
-        name: examName, subject: slot.subject || "Revision", examId: slot.exam_id
-      });
+    const assignedDate = slot.date
+      ? toDateOnly(String(slot.date))
+      : null;
 
-      // 🛡️ REVISION RESERVATION: Now Homework Pass 1 will see this capacity as full
-      if (!isBonus) {
-        occupiedCap[assignedDate] += mins;
-      }
-      processedRevisionIds.add(slot.id);
+    if (!assignedDate || revisionItems[assignedDate] === undefined) return;
+
+    const isDone =
+      slot.is_completed === true ||
+      todayCompletionKeys.has(`revision:${slot.id}`);
+    const mins    = slot.duration_minutes || 30;
+    const label   = slot.displayName || slot.description || "Revision Session";
+    const isFixed = slot.is_fixed === true;
+    const slotType = slot.slot_type ?? "standard";
+
+    // A slot is bonus only if it's on a zero-capacity day
+    const isBonus = isItemBonus(assignedDate, today, baseCapMap);
+
+    revisionItems[assignedDate].push({
+      id:       slot.id,
+      type:     "revision",
+      isDone,
+      minutes:  mins,
+      isBonus,
+      name:     label,
+      subject:  slot.subject || "Revision",
+      examId:   slot.exam_id,
+      slot_type: slotType,
+      is_fixed:  isFixed,
+    });
+
+    if (!isBonus) {
+      occupiedCap[assignedDate] += mins;
     }
+
+    processedRevisionIds.add(slot.id);
   });
 
-  // 🎯 5. HOMEWORK (Now running with full awareness of Revision)
-  const homeworkItems: Record<string, any[]> = {};
-  windowDates.forEach(d => { homeworkItems[d] = []; });
+  // ── 5. HOMEWORK ─────────────────────────────────────────────────────────────
+  // Determine whether today is already "secured" so the scheduler can shift
+  // new placements to tomorrow.
+  // Fix from original: compare revision + weekly completions to actual planned
+  // counts rather than raw key set size.
+  const todayRevisionDone = (revisionItems[today] ?? []).filter(
+    (i) => i.isDone && !i.isBonus
+  ).length;
+  const todayRevisionPlanned = (revisionItems[today] ?? []).filter(
+    (i) => !i.isBonus
+  ).length;
+  const todayIsSecured =
+    todayRevisionPlanned > 0 && todayRevisionDone >= todayRevisionPlanned;
 
-  const sortedHw = [...(deadlines || [])].sort((a: any, b: any) => {
-    if (a.is_fixed !== b.is_fixed) return a.is_fixed ? -1 : 1;
-    return daysBetween(today, a.due_date) - daysBetween(today, b.due_date);
+  const { placedByDate } = scheduleHomework({
+    tasks:               (deadlines ?? []) as HomeworkTask[],
+    windowDates,
+    today,
+    baseCapMap,
+    occupiedCap:         { ...occupiedCap },    // snapshot so scheduler mutates its own copy
+    shiftStartToTomorrow: todayIsSecured,
+    todayCompletionKeys,
+    historicalIds,
   });
 
-  for (const task of sortedHw) {
-    const isDoneToday = todayCompletionKeys.has(`deadline_task:${task.id}`);
-    const isDoneHistory = historicalIds.has(task.id) || (task.status === 'completed' && !isDoneToday);
-    if (isDoneHistory) continue;
+  // Convert PlacedHomeworkTask → PlanItem and merge into occupiedCap
+  const homeworkItems: Record<string, PlanItem[]> = {};
+  windowDates.forEach((d) => (homeworkItems[d] = []));
 
-    let dbScheduledDate = task.scheduled_date ? String(task.scheduled_date).split('T')[0] : null;
-    const mappedBase = { 
-      id: task.id, name: task.name, minutes: task.estimated_minutes, dueDate: task.due_date,
-      isDone: isDoneToday, subject: task.subject_name || task.subject || "",
-      type: 'deadline_task', is_fixed: task.is_fixed, scheduledDate: dbScheduledDate, isBonus: false 
-    };
-
-    // If already scheduled in DB, place it and update occupiedCap
-    if (dbScheduledDate && homeworkItems[dbScheduledDate]) {
-      const isBonus = isDoneToday && dbScheduledDate > today;
-      const targetDate = isBonus ? today : dbScheduledDate;
-      homeworkItems[targetDate].push({ ...mappedBase, isBonus });
-      occupiedCap[targetDate] += task.estimated_minutes;
-      continue;
-    }
-
-    // --- Simulation ---
-    let placedDate: string | null = null;
-    const dayBeforeDeadline = addDays(task.due_date, -1);
-    const todayIsSecured = (todayCompletionKeys.size >= (homeworkItems[today]?.length || 0));
-    const searchStartDate = (todayIsSecured && windowDates[1]) ? windowDates[1] : today;
-    const possibleDays = windowDates.filter(date => date >= searchStartDate && date <= dayBeforeDeadline);
-
-    // Pass 1: Polite Search (Respecting the 45m buffer)
-    for (const d of possibleDays) {
-      if (occupiedCap[d] + task.estimated_minutes + 45 <= baseCapMap[d]) {
-        placedDate = d; break;
+  windowDates.forEach((d) => {
+    (placedByDate[d] ?? []).forEach((task) => {
+      const item: PlanItem = {
+        id:            task.id,
+        name:          task.name,
+        minutes:       task.estimated_minutes,
+        dueDate:       task.due_date,
+        isDone:        task.isDone,
+        isBonus:       task.isBonus,
+        type:          "deadline_task",
+        subject:       task.subject_name || task.subject || "",
+        scheduledDate: task.scheduled_date ?? d,
+      };
+      homeworkItems[d].push(item);
+      if (!item.isBonus) {
+        occupiedCap[d] = (occupiedCap[d] || 0) + (task.estimated_minutes || 0);
       }
-    }
-    // Pass 2: Emergency Search (No buffer)
-    if (!placedDate) {
-      for (const d of possibleDays) {
-        if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
-          placedDate = d; break;
-        }
-      }
-    }
-    // Pass 3: The "Last Resort" (Ensures it gets done before due date)
-    if (!placedDate) {
-      placedDate = possibleDays.length > 0 ? dayBeforeDeadline : searchStartDate;
-    }
+    });
+  });
 
-    if (placedDate && homeworkItems[placedDate]) {
-      const isBonus = placedDate === today && baseCapMap[today] === 0;
-      homeworkItems[placedDate].push({ ...mappedBase, isBonus });
-      occupiedCap[placedDate] += task.estimated_minutes;
-    }
-  }  
-
-  // 6. PROJECTS (Stability & Denominator Fix)
-  const projectItems: Record<string, any[]> = {};
-  windowDates.forEach(d => projectItems[d] = []);
+  // ── 6. PROJECTS ─────────────────────────────────────────────────────────────
+  const projectItems: Record<string, PlanItem[]> = {};
+  windowDates.forEach((d) => (projectItems[d] = []));
 
   const projectProgress: Record<string, number> = {};
-  (projects || []).forEach((p: any) => projectProgress[p.id] = p.completed_minutes || 0);
+  ((projects ?? []) as any[]).forEach(
+    (p) => (projectProgress[p.id] = p.completed_minutes || 0)
+  );
 
-  windowDates.forEach(d => {
-    const DAILY_PROJECT_CEILING = 120;
+  const DAILY_PROJECT_CEILING = 120;
+
+  windowDates.forEach((d) => {
     let totalProjectMinsToday = 0;
-    let spareForProjects = baseCapMap[d] - occupiedCap[d];
+    let spareForProjects = (baseCapMap[d] || 0) - (occupiedCap[d] || 0);
 
-    const sortedProjects = [...(projects || [])].sort((a, b) => daysBetween(d, a.due_date) - daysBetween(d, b.due_date));
+    const sortedProjects = [...((projects ?? []) as any[])].sort(
+      (a, b) => daysBetween(d, a.due_date) - daysBetween(d, b.due_date)
+    );
 
     for (const project of sortedProjects) {
-      const isDoneToday = todayCompletionKeys.has(`project:${project.id}`);
-      if (project.status === 'completed' && !isDoneToday) continue;
+      const isDoneToday =
+        todayCompletionKeys.has(`project:${project.id}`) && d === today;
+      if (project.status === "completed" && !isDoneToday) continue;
 
-      const remainingMinutes = project.estimated_minutes - projectProgress[project.id];
+      const remainingMinutes =
+        project.estimated_minutes - projectProgress[project.id];
       const daysLeft = daysBetween(d, project.due_date);
 
-      // 🎯 STABILITY FIX: 
-      // If it's done today, it IS planned for today. No questions asked.
-      const wasPlannedForToday = (d === today && isDoneToday) || (remainingMinutes > 0 && daysLeft >= 0);
+      const shouldPlan =
+        (d === today && isDoneToday) ||
+        (remainingMinutes > 0 && daysLeft >= 0);
 
-      if (wasPlannedForToday) {
-        // If it's already done, we don't care about the 15m spare "threshold"
-        if (!isDoneToday) {
-           if (totalProjectMinsToday >= DAILY_PROJECT_CEILING) break;
-           if (spareForProjects < 15) break; // Strict 15m floor for NEW plans
-        }
+      if (!shouldPlan) continue;
 
-        const maxSession = daysLeft <= 5 ? 90 : 60;
-        
-        // 🎯 DYNAMIC ALLOCATION:
-        // If done today, we use a fixed 60m block (or whatever was logged). 
-        // This keeps the denominator stable.
-        let allocation = (isDoneToday && d === today) 
-          ? 60 
-          : Math.min(remainingMinutes, spareForProjects, maxSession, (DAILY_PROJECT_CEILING - totalProjectMinsToday));
-
-        if (allocation >= 15 || (isDoneToday && d === today)) {
-          // A project is only a bonus if the day's base capacity was 0 (Holiday/Day Off)
-          const isBonus = d === today && baseCapMap[d] === 0;
-          
-          projectItems[d].push({
-            id: project.id, 
-            projectId: project.id, 
-            type: 'project', 
-            isDone: isDoneToday && d === today,
-            minutes: allocation, 
-            isBonus, 
-            name: `Project: ${project.name}`, 
-            subject: project.subject || "Project"
-          });
-
-          if (!isBonus) {
-            spareForProjects -= allocation;
-            occupiedCap[d] += allocation;
-            totalProjectMinsToday += allocation;
-          }
-          projectProgress[project.id] += allocation;
-        }
+      if (!isDoneToday) {
+        if (totalProjectMinsToday >= DAILY_PROJECT_CEILING) break;
+        if (spareForProjects < 15) break;
       }
+
+      const maxSession = daysLeft <= 5 ? 90 : 60;
+      const allocation = isDoneToday
+        ? 60 // stable denominator for completed sessions
+        : Math.min(
+            remainingMinutes,
+            spareForProjects,
+            maxSession,
+            DAILY_PROJECT_CEILING - totalProjectMinsToday
+          );
+
+      if (allocation < 15 && !isDoneToday) continue;
+
+      const isBonus = isItemBonus(d, today, baseCapMap);
+
+      projectItems[d].push({
+        id:        project.id,
+        projectId: project.id,
+        type:      "project",
+        isDone:    isDoneToday,
+        minutes:   allocation,
+        isBonus,
+        name:      `Project: ${project.name}`,
+        subject:   project.subject || "Project",
+      });
+
+      if (!isBonus) {
+        spareForProjects -= allocation;
+        occupiedCap[d] = (occupiedCap[d] || 0) + allocation;
+        totalProjectMinsToday += allocation;
+      }
+      projectProgress[project.id] += allocation;
     }
   });
 
-  // 7. FINAL ASSEMBLY
-// 7. FINAL ASSEMBLY (The Absolute ID Anchor)
-  const days: DayPlan[] = windowDates.map((d: string) => {
-    // 1. Collect everything the engines produced for this day
-    const rawItems = [
-      ...(weeklyItems[d] || []), 
-      ...(homeworkItems[d] || []), 
-      ...(revisionItems[d] || []), 
-      ...(projectItems[d] || [])
+  // ── 7. FINAL ASSEMBLY ───────────────────────────────────────────────────────
+  const days: DayPlan[] = windowDates.map((d) => {
+    const rawItems: PlanItem[] = [
+      ...(weeklyItems[d]   ?? []),
+      ...(homeworkItems[d] ?? []),
+      ...(revisionItems[d] ?? []),
+      ...(projectItems[d]  ?? []),
     ];
-    
-    // 2. 🎯 THE UNIQUE MAP (Prevents Double-Counting)
-    // This ensures that even if the engine creates a "Ghost" of a 1hr slot,
-    // we only look at that slot ID once.
-    const uniqueMap = new Map();
-    rawItems.forEach(item => {
+
+    // Deduplicate by id — keep the "done" version if there's a conflict
+    const uniqueMap = new Map<string, PlanItem>();
+    rawItems.forEach((item) => {
       const existing = uniqueMap.get(item.id);
-      // Priority: If we have a duplicate, keep the one that is "Done"
       if (!existing || (!existing.isDone && item.isDone)) {
         uniqueMap.set(item.id, item);
       }
@@ -263,33 +285,44 @@ export function buildWeekPlan({
 
     const finalItems = Array.from(uniqueMap.values());
 
-    // 3. 🎯 THE STABLE DENOMINATOR
-    // We only count items toward the "Goal" if they aren't marked as Bonus.
-    const dayTotalPlannedMinutes = finalItems
-      .filter(i => !i.isBonus)
-      .reduce((sum, i) => sum + (i.minutes || 0), 0);
+    const nonBonusItems    = finalItems.filter((i) => !i.isBonus);
+    const totalPlanned     = nonBonusItems.reduce((s, i) => s + (i.minutes || 0), 0);
+    const plannedCount     = nonBonusItems.length;
+    const totalCompleted   = finalItems.filter((i) => i.isDone).reduce((s, i) => s + (i.minutes || 0), 0);
+    const completedCount   = finalItems.filter((i) => i.isDone).length;
 
-    const plannedCount = finalItems.filter(i => !i.isBonus).length;
-
-    // 4. 🎯 THE STABLE NUMERATOR
-    const dayTotalDoneMinutes = finalItems
-      .filter(i => i.isDone)
-      .reduce((sum, i) => sum + (i.minutes || 0), 0);
-      
-    const completedCount = finalItems.filter(i => i.isDone).length;
+    const wItems = weeklyItems[d]   ?? [];
+    const hItems = homeworkItems[d] ?? [];
+    const rItems = revisionItems[d] ?? [];
+    const pItems = projectItems[d]  ?? [];
 
     return {
       date: d,
-      baseCapacity: baseCapMap[d],
-      weekly: { minutes: (weeklyItems[d] || []).reduce((s, i) => s + (i.minutes || 0), 0), items: weeklyItems[d] || [] },
-      homework: { minutes: (homeworkItems[d] || []).reduce((s, i) => s + (i.minutes || 0), 0), actualCompletedMinutes: (homeworkItems[d] || []).filter(i => i.isDone).reduce((s, i) => s + (i.minutes || 0), 0), items: homeworkItems[d] || [] },
-      revision: { minutes: (revisionItems[d] || []).reduce((s, i) => s + (i.minutes || 0), 0), items: revisionItems[d] || [] },
-      projects: { minutes: (projectItems[d] || []).reduce((s, i) => s + (i.minutes || 0), 0), items: projectItems[d] || [] },
-      totalPlanned: dayTotalPlannedMinutes, 
-      totalCompleted: dayTotalDoneMinutes,
-      plannedTaskCount: plannedCount,   
-      completedTaskCount: completedCount, 
-      spare: Math.max(0, baseCapMap[d] - dayTotalPlannedMinutes)
+      baseCapacity: baseCapMap[d] ?? 0,
+      weekly: {
+        minutes: wItems.reduce((s, i) => s + (i.minutes || 0), 0),
+        items:   wItems,
+      },
+      homework: {
+        minutes: hItems.reduce((s, i) => s + (i.minutes || 0), 0),
+        actualCompletedMinutes: hItems
+          .filter((i) => i.isDone)
+          .reduce((s, i) => s + (i.minutes || 0), 0),
+        items: hItems,
+      },
+      revision: {
+        minutes: rItems.reduce((s, i) => s + (i.minutes || 0), 0),
+        items:   rItems,
+      },
+      projects: {
+        minutes: pItems.reduce((s, i) => s + (i.minutes || 0), 0),
+        items:   pItems,
+      },
+      totalPlanned,
+      totalCompleted,
+      plannedTaskCount:   plannedCount,
+      completedTaskCount: completedCount,
+      spare: Math.max(0, (baseCapMap[d] ?? 0) - totalPlanned),
     };
   });
 

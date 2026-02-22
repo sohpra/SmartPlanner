@@ -46,14 +46,13 @@ export default function ExamsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 2. Mark specific slot as done and move its date to today
-      // This ensures buildWeekPlan treats it as a "Today" item.
+      // 2. Mark the slot as completed and move its date to today so
+      // buildWeekPlan treats it as a today item.
       await supabase
         .from("revision_slots")
         .update({ 
           is_completed: true, 
           date: todayStr,
-          description: `[Bonus] ${nextSlot.displayName || nextSlot.description || 'Revision'}` 
         })
         .eq("id", nextSlot.id);
 
@@ -97,7 +96,7 @@ export default function ExamsPage() {
       const { error } = await supabase.from("exams").delete().eq("id", id);
       if (error) throw error;
       await syncRevisionSlots();
-      refresh();
+      await Promise.all([refresh(), refreshRevision()]);
     } catch (err: any) {
       alert("Error: " + err.message);
       setHiddenIds((prev) => {
@@ -182,6 +181,23 @@ export default function ExamsPage() {
                       <h3 className="text-3xl font-black italic tracking-tight text-slate-900 leading-tight">
                         {exam.subject}
                       </h3>
+
+                      {/* Exam detail — board / competitive name / topics */}
+                      {exam.exam_type === "Board" && exam.exam_board && (
+                        <p className="text-sm font-bold text-slate-500 mt-1">{exam.exam_board}</p>
+                      )}
+                      {exam.exam_type === "Competitive" && exam.competitive_exam_name && (
+                        <p className="text-sm font-bold text-slate-500 mt-1">{exam.competitive_exam_name}</p>
+                      )}
+                      {exam.exam_type === "Internal" && exam.topics && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {String(exam.topics).split(",").map((t: string) => t.trim()).filter(Boolean).map((topic: string) => (
+                            <span key={topic} className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                              {topic}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap gap-6">
@@ -194,12 +210,12 @@ export default function ExamsPage() {
                           })}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 text-blue-600">
+                      {/*<div className="flex items-center gap-2 text-blue-600">
                         <Target className="w-4 h-4" />
                         <p className="text-[10px] font-bold uppercase tracking-widest">
                           Preparedness: {exam.preparedness}%
                         </p>
-                      </div>
+                      </div>*/}
                     </div>
                   </div>
 
@@ -294,8 +310,14 @@ export default function ExamsPage() {
         onClose={() => setOpen(false)} 
         onAdded={async () => { 
           setIsProcessing(true);
-          await syncRevisionSlots();
-          await refresh(); 
+          try {
+            const result = await syncRevisionSlots();
+            if (!result.success) console.warn("Sync issue:", result.error);
+          } catch (err) {
+            console.error("Sync failed:", err);
+          }
+          // Refresh both exams list AND revision slots so UI is up to date
+          await Promise.all([refresh(), refreshRevision()]);
           setIsProcessing(false);
         }} 
       />
