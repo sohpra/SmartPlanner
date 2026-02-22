@@ -33,18 +33,36 @@ export const dynamic = 'force-dynamic';
 export default function PlannerPage() {
   const searchParams = useSearchParams();
   const urlView = searchParams.get("view");
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  // 🔴 FIX: today must re-compute at midnight, not stay frozen from mount time.
+  // useMemo([]) permanently locks the date to the day the component first mounted.
+  const [today, setToday] = useState(() => new Date().toISOString().slice(0, 10));
+  useEffect(() => {
+    const msUntilMidnight = () => {
+      const now = new Date();
+      const midnight = new Date(now);
+      midnight.setHours(24, 0, 0, 0);
+      return midnight.getTime() - now.getTime();
+    };
+    const scheduleRoll = () => {
+      const t = setTimeout(() => {
+        setToday(new Date().toISOString().slice(0, 10));
+        scheduleRoll();
+      }, msUntilMidnight());
+      return t;
+    };
+    const t = scheduleRoll();
+    return () => clearTimeout(t);
+  }, []);
   const [view, setView] = useState<"daily" | "weekly" | "monthly">("daily");
   
-  const lastCelebratedCount = useRef(0);
-  const lastSyncedMins = useRef<number | null>(null); // 🎯 Prevents double-syncing the same total
+  const lastSyncedMins = useRef<number | null>(null);
   
   const [isHydrating, setIsHydrating] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   
-  // 🎯 BONUS MINUTE STATE
-  const [localBonusMins, setLocalBonusMins] = useState(0); 
-  const [dbBonusMins, setDbBonusMins] = useState(0);       
+  // 🟡 FIX: dbBonusMins was set but never read — removed.
+  // setDbBonusMins kept only for hydration seeding of localBonusMins.
+  const [localBonusMins, setLocalBonusMins] = useState(0);
 
   // 🎯 LIVE STATS STATE
   const [stats, setStats] = useState<{ 
@@ -67,19 +85,10 @@ export default function PlannerPage() {
   const { slots: revisionSlots, isLoading: revisionLoading, refresh: refreshRevision } = useRevision();  const { capacityData, loading: capacityLoading, refresh: refreshCapacity } = usePlannerCapacity();
 
   const activePlan = useMemo(() => {
-    // 🎯 THE SHIELD: 
-    // We must NOT run buildWeekPlan if capacityData is missing.
-    // In production, this data often arrives a few milliseconds after the component mounts.
-    const isDataLoaded = 
-      !exams.loading && 
-      !projectsLoading && 
-      !deadlinesLoading && 
-      !weeklyLoading && 
-      !capacityLoading && 
-      !revisionLoading &&
-      !!capacityData; // 👈 CRITICAL: Ensure capacityData is truthy
-
-    if (!isDataLoaded) return null;
+    // 🔴 FIX: Loading flags are NOT data — including them in the dep array caused
+    // unnecessary re-runs. The actual gate is !!capacityData and the data arrays
+    // being stable (hooks return [] while loading, not undefined).
+    if (!capacityData) return null;
 
     return buildWeekPlan({
       today,
@@ -89,10 +98,10 @@ export default function PlannerPage() {
       exams: exams.upcoming || [],
       projects,
       completions: completions.allCompletions || [],
-      capacityData, // Now we are sure this isn't empty
-      revisionSlots, 
+      capacityData,
+      revisionSlots,
     });
-  }, [today, exams.upcoming, projects, deadlines, weeklyTasks, exams.loading, projectsLoading, deadlinesLoading, weeklyLoading, completions.allCompletions, capacityData, capacityLoading, revisionSlots, revisionLoading]);
+  }, [today, exams.upcoming, projects, deadlines, weeklyTasks, completions.allCompletions, capacityData, revisionSlots]);
 
   const activeProjects = useMemo(() => (projects || []).filter((p: any) => p.status === 'active'), [projects]);
 
@@ -148,10 +157,12 @@ export default function PlannerPage() {
         .single();
 
       if (todayData) {
-        // Calculate bonus relative to today's planned total
-        const actualBonus = todayData.mins_completed - todayPlan.totalPlanned;
-        setDbBonusMins(Math.max(0, actualBonus));
-        setLocalBonusMins(0); 
+        // localBonusMins is intentionally NOT seeded from the DB.
+        // It's a session-only accumulator for the +15m / +30m buttons clicked
+        // THIS session. The DB already has the full historical total baked into
+        // mins_completed — if we re-seed localBonusMins from it, every page
+        // refresh adds the old bonus on top of itself again.
+        // localBonusMins starts at 0 on every page load (its useState default).
       }
       setIsHydrating(false);
     };
@@ -164,11 +175,12 @@ export default function PlannerPage() {
     try {
       const result = await syncRevisionSlots();
       if (result.success) {
-        // 🎯 This forces the useRevision hook to re-fetch and updates the UI instantly
-        await completions.refresh(); // Refresh completions
-        await refreshRevision();     // From useRevision()
-        await refreshCapacity();     // From usePlannerCapacity()
-        
+        // 🟡 FIX: These three refreshes are independent — run them concurrently.
+        await Promise.all([
+          completions.refresh(),
+          refreshRevision(),
+          refreshCapacity(),
+        ]);
         console.log("Roadmap successfully re-shuffled.");
       }
     } catch (err) {
@@ -201,21 +213,18 @@ export default function PlannerPage() {
   // 🎯 2. THE SYNC: One single "Pipe" to the database
   useEffect(() => {
     // THE IRON GATE: Only sync if we have a stable plan and are done hydrating
-    if (isHydrating || !stats || !todayPlan || todayPlan.plannedTaskCount === 0) return;
+    if (isHydrating || !todayPlan || todayPlan.plannedTaskCount === 0) return;
 
     const syncStats = async () => {
-      // THE TRUTH: Current Plan Completion + Session Bonus Clicks
       const currentTaskMins = todayPlan.totalCompleted || 0;
       const totalToSave = currentTaskMins + localBonusMins;
 
-      // STABILITY CHECK: Don't hit the DB if the value is the same as the last sync
       if (totalToSave === lastSyncedMins.current) return;
 
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // OVERWRITE SYNC: Sends the absolute total to the database
         await supabase.rpc('sync_daily_stats', {
           target_user_id: user.id, 
           is_mission_secured: isSecured, 
@@ -226,13 +235,16 @@ export default function PlannerPage() {
           completed_mins: totalToSave   
         });
 
-        // Memorize this total to prevent redundant calls
         lastSyncedMins.current = totalToSave;
 
-        // Pull fresh stats (streak, elite count)
-        const { data: newStats } = await supabase.from('planner_stats')
+        // 🔴 FIX: stats is NOT in the dep array. It was being read here and written
+        // via setStats, which could create a feedback loop. We only need the latest
+        // stats from DB after a successful sync — fetch independently.
+        const { data: newStats } = await supabase
+          .from('planner_stats')
           .select('current_streak, longest_streak, elite_count, lifetime_bonus_mins')
-          .eq('user_id', user.id).single();
+          .eq('user_id', user.id)
+          .single();
         if (newStats) setStats(newStats);
         
       } catch (err) { 
@@ -240,7 +252,6 @@ export default function PlannerPage() {
       }
     };
 
-    // DEBOUNCE: Wait 1.5 seconds after the last change before committing
     const timer = setTimeout(syncStats, 1500);
     return () => clearTimeout(timer);
 
@@ -251,20 +262,25 @@ export default function PlannerPage() {
     isSecured, 
     isElite, 
     isHydrating, 
-    stats, 
+    // 🔴 FIX: `stats` removed — it was written inside this effect (via setStats),
+    // including it would re-trigger the effect every time a sync completed.
     localBonusMins
   ]);
   
   // 🎉 Celebration Logic
+  // 🟡 FIX: Track both completedTaskCount AND isSecured so confetti only fires
+  // when the task actually completes the mission, not on every re-memoize.
+  const lastCelebratedState = useRef<string | null>(null);
   useEffect(() => {
-    if (!todayPlan) return;
-    if (isSecured && hasTasks && todayPlan.completedTaskCount > lastCelebratedCount.current) {
-      confetti({
-        particleCount: 150, spread: 70, origin: { y: 0.6 },
-        colors: isElite ? ['#a855f7', '#d946ef', '#3b82f6'] : ['#10b981', '#3b82f6', '#60a5fa']
-      });
-    }
-    lastCelebratedCount.current = todayPlan.completedTaskCount;
+    if (!todayPlan || !isSecured || !hasTasks) return;
+    // Key = secured state + count — confetti won't re-fire unless something new changes
+    const celebrationKey = `${todayPlan.completedTaskCount}-${isSecured}`;
+    if (celebrationKey === lastCelebratedState.current) return;
+    lastCelebratedState.current = celebrationKey;
+    confetti({
+      particleCount: 150, spread: 70, origin: { y: 0.6 },
+      colors: isElite ? ['#a855f7', '#d946ef', '#3b82f6'] : ['#10b981', '#3b82f6', '#60a5fa']
+    });
   }, [todayPlan?.completedTaskCount, isSecured, hasTasks, isElite]);
 
   if (!activePlan || !todayPlan) {
@@ -411,13 +427,20 @@ export default function PlannerPage() {
 }
 
 function StatCard({ icon, label, val, color }: any) {
-  const colorMap: Record<string, string> = { emerald: "bg-emerald-500 shadow-emerald-100 text-emerald-600", orange: "bg-orange-500 shadow-orange-100 text-orange-600" };
+  // 🟢 FIX: Never split Tailwind class strings at runtime — Tailwind's JIT/purge
+  // scans source for complete class strings. Dynamic splits produce classes that
+  // don't exist in the stylesheet.
+  const colorMap: Record<string, { bg: string; shadow: string; text: string }> = {
+    emerald: { bg: "bg-emerald-500", shadow: "shadow-emerald-100", text: "text-emerald-600" },
+    orange:  { bg: "bg-orange-500",  shadow: "shadow-orange-100",  text: "text-orange-600"  },
+  };
+  const c = colorMap[color];
   return (
     <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex items-center gap-4">
-      <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-lg text-white ${colorMap[color].split(' ')[0]}`}>{icon}</div>
+      <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-lg text-white ${c.bg} ${c.shadow}`}>{icon}</div>
       <div>
         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{label}</p>
-        <p className={`text-xl font-black italic ${colorMap[color].split(' ')[2]}`}>{val}</p>
+        <p className={`text-xl font-black italic ${c.text}`}>{val}</p>
       </div>
     </div>
   );
