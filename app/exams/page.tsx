@@ -19,7 +19,11 @@ export default function ExamsPage() {
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayStr = useMemo(() => {
+    const now = new Date();
+    const offset = now.getTimezoneOffset();
+    return new Date(now.getTime() - offset * 60 * 1000).toISOString().split('T')[0];
+  }, []);
 
   const visibleExams = useMemo(() => {
     return upcoming

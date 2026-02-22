@@ -20,17 +20,17 @@ type SlotRequirement = {
 
 // ─── Defaults per exam type ───────────────────────────────────────────────────
 
-const DEFAULT_REQUIREMENTS: Record<string, SlotRequirement[]> = {
+const DEFAULT_REQUIREMENTS: Record<string, Omit<SlotRequirement, 'id'>[]> = {
   internal: [
-    { id: crypto.randomUUID(), type: "standard", duration_minutes: 30, count: 4 },
+    { type: "standard", duration_minutes: 30, count: 4 },
   ],
   board: [
-    { id: crypto.randomUUID(), type: "standard",       duration_minutes: 45,  count: 8                                    },
-    { id: crypto.randomUUID(), type: "practice_paper", duration_minutes: 120, count: 2, min_days_before: 5, max_days_before: 30 },
+    { type: "standard",       duration_minutes: 45,  count: 8                                    },
+    { type: "practice_paper", duration_minutes: 120, count: 2, min_days_before: 5, max_days_before: 30 },
   ],
   competitive: [
-    { id: crypto.randomUUID(), type: "standard",       duration_minutes: 60,  count: 10                                   },
-    { id: crypto.randomUUID(), type: "practice_paper", duration_minutes: 180, count: 3, min_days_before: 7, max_days_before: 45 },
+    { type: "standard",       duration_minutes: 60,  count: 10                                   },
+    { type: "practice_paper", duration_minutes: 180, count: 3, min_days_before: 7, max_days_before: 45 },
   ],
 };
 
@@ -204,7 +204,7 @@ export function ExamModal({ open, onClose, onAdded }: any) {
       setTopicInput("");
       setIsSyncing(false);
       setRevisionOpen(false);
-      setRequirements(DEFAULT_REQUIREMENTS["internal"].map(r => ({ ...r, id: crypto.randomUUID() })));
+      setRequirements(DEFAULT_REQUIREMENTS["internal"].map((r: any) => ({ ...r, id: crypto.randomUUID() })));
     }
   }, [open]);
 
@@ -221,7 +221,7 @@ export function ExamModal({ open, onClose, onAdded }: any) {
   // When exam type changes, reset requirements to sensible defaults
   // (preparedness effect above will then scale the count immediately after)
   useEffect(() => {
-    setRequirements(DEFAULT_REQUIREMENTS[examType]?.map(r => ({ ...r, id: crypto.randomUUID() })) ?? []);
+    setRequirements(DEFAULT_REQUIREMENTS[examType]?.map((r: any) => ({ ...r, id: crypto.randomUUID() })) ?? []);
     if (examType !== "internal") setRevisionOpen(true);
   }, [examType]);
 

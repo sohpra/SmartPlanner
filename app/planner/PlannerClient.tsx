@@ -35,7 +35,12 @@ export default function PlannerPage() {
   const urlView = searchParams.get("view");
   // 🔴 FIX: today must re-compute at midnight, not stay frozen from mount time.
   // useMemo([]) permanently locks the date to the day the component first mounted.
-  const [today, setToday] = useState(() => new Date().toISOString().slice(0, 10));
+  const getLocalISODate = () => {
+    const now = new Date();
+    const offset = now.getTimezoneOffset();
+    return new Date(now.getTime() - offset * 60 * 1000).toISOString().split('T')[0];
+  };
+  const [today, setToday] = useState(getLocalISODate);
   useEffect(() => {
     const msUntilMidnight = () => {
       const now = new Date();
@@ -45,7 +50,7 @@ export default function PlannerPage() {
     };
     const scheduleRoll = () => {
       const t = setTimeout(() => {
-        setToday(new Date().toISOString().slice(0, 10));
+        setToday(getLocalISODate());
         scheduleRoll();
       }, msUntilMidnight());
       return t;
