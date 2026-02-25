@@ -309,22 +309,34 @@ export default function ExamsPage() {
         </div>
       )}
 
-      <ExamModal 
-        open={open} 
-        onClose={() => setOpen(false)} 
-        onAdded={async () => { 
-          setIsProcessing(true);
-          try {
-            const result = await syncRevisionSlots();
-            if (!result.success) console.warn("Sync issue:", result.error);
-          } catch (err) {
-            console.error("Sync failed:", err);
+    <ExamModal 
+      open={open} 
+      onClose={() => setOpen(false)} 
+      onAdded={async () => { 
+        setIsProcessing(true);
+        try {
+          // 1. First, force the Exam hook to fetch the latest list from DB
+          // This ensures the engine "sees" the new exam when called
+          await refresh(); 
+
+          // 2. Now trigger the Orchestrator
+          // The engine will now find the new exam and its JSONB requirements
+          const result = await syncRevisionSlots();
+          
+          if (!result.success) {
+            console.warn("Sync issue:", result.error);
           }
-          // Refresh both exams list AND revision slots so UI is up to date
-          await Promise.all([refresh(), refreshRevision()]);
+
+          // 3. Finally, refresh the slots to show the new sessions on screen
+          await refreshRevision();
+          
+        } catch (err) {
+          console.error("Sync failed:", err);
+        } finally {
           setIsProcessing(false);
-        }} 
-      />
+        }
+      }} 
+    />
     </div>
   );
 }

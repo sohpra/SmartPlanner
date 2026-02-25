@@ -207,6 +207,7 @@ export async function syncRevisionSlots() {
       completionMap[key] = (completionMap[key] || 0) + 1;
     });
 
+    /*
     fixedFutureSlots.forEach((s: any) => {
       const key = `${s.exam_id}:${s.slot_type ?? "practice_paper"}`;
       completionMap[key] = (completionMap[key] || 0) + 1;
@@ -214,7 +215,7 @@ export async function syncRevisionSlots() {
       const d = toDateOnly(s.date);
       if (!existingFixedPaperDates[s.exam_id]) existingFixedPaperDates[s.exam_id] = [];
       existingFixedPaperDates[s.exam_id].push(d);
-    });
+    });*/
 
     // ── 9. RUN REVISION ENGINE ────────────────────────────────────────────────
     const virtualPlan = planRevisionSlots(exams, {
@@ -232,36 +233,65 @@ export async function syncRevisionSlots() {
     // Fixed (practice paper) slots stay in DB — they were credited into
     // completionMap above so the engine produces remainingSlots=0 for papers
     // and won't try to re-insert them. Idempotent: reshuffle N times, same result.
+    // 🎯 THE FIX: Deep Clean
+    // We delete EVERY uncompleted slot for this user from today onwards.
+    // This clears the way for the engine to re-place everything (Fixed or Standard) 
+    // without hitting a duplicate key error.
+    // 🎯 TOTAL WIPE: No filters other than User and Date.
+    // This ensures a 100% clean slate for the insert.
+    // ── 10. ATOMIC DB SYNC (Clean Wipe + Merged Insertion) ─────────────────────
+    
+    // 1. CLEAR THE SLATE
+    // We wipe all uncompleted slots from today onwards to ensure no collisions.
     const { error: deleteError } = await supabase
       .from("revision_slots")
       .delete()
-      .eq("user_id", user.id)
-      .eq("is_completed", false)
-      .eq("is_fixed", false)
-      .gte("date", syncFromDate);
+      .match({ user_id: user.id, is_completed: false })
+      .gte("date", today); 
 
     if (deleteError) {
       console.error("❌ Delete error:", deleteError.message);
       throw new Error(`Delete failed: ${deleteError.message}`);
     }
 
-    // Insert everything the engine produced (standard + practice papers)
-    const allRows = virtualPlan.days
-      .filter((day) => day.date >= syncFromDate)
-      .flatMap((day) =>
-        day.slots.map((slot) => ({
-          user_id:          user.id,
-          exam_id:          slot.examId,
-          date:             day.date,
-          duration_minutes: slot.slotMinutes,
-          description:      slot.label,
-          is_completed:     false,
-          is_fixed:         slot.isFixed,
-          slot_type:        slot.slotType,
-          subject:          slot.subject,
-        }))
-      );
+    // 2. MERGE SAME-DAY SLOTS
+    // Your DB constraint forbids multiple entries for the same Exam/Date/Type.
+    // We use a Map to combine them (e.g., two 30m sessions become one 60m session).
+    const groupedSlots = new Map<string, any>();
 
+    virtualPlan.days
+      .filter((day) => day.date >= syncFromDate)
+      .forEach((day) => {
+        day.slots.forEach((slot) => {
+          // Unique key based on your DB constraint: Date + Exam + Type
+          const key = `${day.date}-${slot.examId}-${slot.slotType}`;
+          
+          if (groupedSlots.has(key)) {
+            const existing = groupedSlots.get(key);
+            existing.duration_minutes += slot.slotMinutes;
+            // Optionally update description to show it's a combined session
+            if (!existing.description.includes("(Combined)")) {
+              existing.description += " (Combined)";
+            }
+          } else {
+            groupedSlots.set(key, {
+              user_id:          user.id,
+              exam_id:          slot.examId,
+              date:             day.date,
+              duration_minutes: slot.slotMinutes,
+              description:      slot.label,
+              is_completed:     false,
+              is_fixed:         slot.isFixed,
+              slot_type:        slot.slotType,
+              subject:          slot.subject,
+            });
+          }
+        });
+      });
+
+    const allRows = Array.from(groupedSlots.values());
+
+    // 3. BULK INSERT
     if (allRows.length > 0) {
       const { error: insertError } = await supabase
         .from("revision_slots")
@@ -269,6 +299,8 @@ export async function syncRevisionSlots() {
 
       if (insertError) {
         console.error("❌ Insert error:", insertError.message);
+        // If this still fails, it means there is a hidden 'is_completed: true' row 
+        // on one of these dates blocking the insert.
         throw new Error(`Insert failed: ${insertError.message}`);
       }
     }

@@ -72,20 +72,27 @@ export function buildRevisionDemands(
   const subject = (exam.subject ?? "Unknown").trim();
   const preparedness = Math.max(0, Math.min(100, exam.preparedness ?? 50));
 
+  // 🎯 THE FIX: Use requirements if they exist, otherwise fallback
   const requirements: SlotRequirement[] =
-    exam.slot_requirements?.length
+    exam.slot_requirements && Array.isArray(exam.slot_requirements) && exam.slot_requirements.length > 0
       ? exam.slot_requirements
-      : FALLBACK_REQUIREMENTS[exam.exam_type];
+      : FALLBACK_REQUIREMENTS[exam.exam_type] || FALLBACK_REQUIREMENTS.Internal;
 
+  // We use .flatMap because one requirement (e.g., "Standard x4") 
+  // needs to return a single demand object that carries the 'remainingSlots' total.
   return requirements.map((req): RevisionDemand => {
-    // Preparedness scales the number of standard sessions needed.
-    // Practice papers are always done in full regardless of preparedness.
     let count = req.count;
-    if (req.type === "standard") {
+
+    // 🛡️ ONLY apply the preparedness multiplier if it's a FALLBACK requirement.
+    // If the user set this in the modal, we treat it as an absolute "Target".
+    const isCustom = exam.slot_requirements && exam.slot_requirements.length > 0;
+    
+    if (req.type === "standard" && !isCustom) {
       const multiplier = Math.max(0.4, (100 - preparedness) / 50);
       count = Math.max(1, Math.round(req.count * multiplier));
     }
 
+    // 🎯 MATCHING FIX: Ensure the key matches exactly what's in the DB
     const completedKey = `${exam.id}:${req.type}`;
     const alreadyDone = completionMap[completedKey] ?? 0;
     const remainingSlots = Math.max(0, count - alreadyDone);
@@ -98,7 +105,7 @@ export function buildRevisionDemands(
       preparedness,
       slotType: req.type,
       slotMinutes: req.duration_minutes,
-      remainingSlots,
+      remainingSlots, // The engine uses this to decide how many slots to loop through
       minDaysBefore: req.min_days_before ?? defaultMinDays(exam.exam_type, req.type),
       maxDaysBefore: req.max_days_before ?? defaultMaxDays(exam.exam_type, req.type),
       competitive_exam_name: exam.competitive_exam_name,
@@ -326,8 +333,15 @@ export function planRevisionSlots(
       for (const demand of standardDemands) {
         if (demand.remainingSlots <= 0) continue;
 
+        // 🛡️ THE GUARD: 
+        // "Has this exam already been placed on THIS specific date?"
+        const alreadyPlannedToday = day.slots.some(s => s.examId === demand.examId);
+        
+        // If it has, SKIP this day for this specific demand and move to the next day
+        if (alreadyPlannedToday) continue; 
+
         const gap = daysBetween(day.date, demand.examDate);
-        if (gap <= 0) continue; // never on or after exam day
+        if (gap <= 0) continue; 
         if (day.remainingMinutes < demand.slotMinutes) continue;
 
         const subjectCount = day.slots.filter(
