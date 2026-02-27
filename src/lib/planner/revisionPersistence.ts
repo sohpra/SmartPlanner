@@ -31,6 +31,7 @@ import { buildDateWindow, toDateOnly, addDays } from "./dateUtils";
 import type { ExamInput, HomeworkTask } from "./types";
 
 export async function syncRevisionSlots() {
+  // 🎯 1. Define these FIRST so everything below can find them
   const today = new Date().toISOString().split("T")[0];
   const tomorrow = addDays(today, 1);
 
@@ -38,9 +39,18 @@ export async function syncRevisionSlots() {
   if (!user) return { success: false, message: "No user session" };
 
   try {
-    // ── 1. FETCH ALL DATA (parallel) ──────────────────────────────────────────
+    // ── 2. FETCH EXAMS FIRST (needed for the filter below) ─────────────────────
+    const { data: examsData } = await supabase
+      .from("exams")
+      .select("*")
+      .eq("user_id", user.id)
+      .gte("date", today);
+    
+    const exams = (examsData ?? []) as ExamInput[];
+    const examIds = exams.map(e => e.id);
+
+    // ── 3. FETCH EVERYTHING ELSE (parallel) ──────────────────────────────────
     const [
-      examsRes,
       recurringRes,
       homeworkRes,
       settingsRes,
@@ -50,7 +60,6 @@ export async function syncRevisionSlots() {
       historicalCompletionsRes,
       fixedFutureSlotsRes,
     ] = await Promise.all([
-      supabase.from("exams").select("*").eq("user_id", user.id).gte("date", today),
       supabase.from("recurring_tasks").select("*").eq("user_id", user.id),
       supabase
         .from("deadline_tasks")
@@ -70,14 +79,12 @@ export async function syncRevisionSlots() {
         .select("source_id, source_type")
         .eq("user_id", user.id)
         .eq("date", today),
-      // All historically completed slots — for completionMap
       supabase
         .from("revision_slots")
         .select("exam_id, slot_type")
         .eq("user_id", user.id)
-        .eq("is_completed", true),
-      // Existing fixed (practice paper) slots not yet completed.
-      // Fetched BEFORE the delete so we can credit them into completionMap.
+        .eq("is_completed", true)
+        .in("exam_id", examIds), // 🎯 Now examIds is available!
       supabase
         .from("revision_slots")
         .select("exam_id, date, duration_minutes, slot_type")
@@ -87,7 +94,8 @@ export async function syncRevisionSlots() {
         .gte("date", today),
     ]);
 
-    const exams            = (examsRes.data ?? []) as ExamInput[];
+    // ── 4. ASSIGN DATA ───────────────────────────────────────────────────────
+    // Note: 'exams' is already assigned above.
     const recurringTasks   = recurringRes.data ?? [];
     const homework         = (homeworkRes.data ?? []) as HomeworkTask[];
     const settingsRows     = settingsRes.data ?? [];
@@ -174,14 +182,13 @@ export async function syncRevisionSlots() {
     });
 
     // ── 6. ENGINE CAPACITY MAP ────────────────────────────────────────────────
-    // occupiedByHw already contains rocks (passed as starting occupiedCap).
     const engineCapacityMap: Record<string, number> = {};
     windowDates.forEach((d) => {
       const existingRevMins = d === today ? revisionMinsAlreadyToday : 0;
-      engineCapacityMap[d] = Math.max(
-        0,
-        (baseCapMap[d] || 0) - (occupiedByHw[d] || 0) - existingRevMins
-      );
+      
+      const available = (baseCapMap[d] || 0) - (occupiedByHw[d] || 0) - existingRevMins;
+      
+      engineCapacityMap[d] = Math.max(0, available);
     });
 
     // ── 7. PERSIST HOMEWORK DATE CHANGES ──────────────────────────────────────

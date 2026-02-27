@@ -10,7 +10,15 @@
  */
 export function toDateOnly(dateStr: string): string {
   if (!dateStr) return "";
-  return dateStr.split("T")[0].split(" ")[0];
+  
+  // Create date object and force it to be treated as local to avoid UTC shifts
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr.split("T")[0].split(" ")[0];
+  
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
 }
 
 /**

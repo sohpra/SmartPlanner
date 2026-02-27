@@ -159,7 +159,7 @@ export default function PlannerPage() {
         .select('mins_completed, mins_planned')
         .eq('user_id', user.id)
         .eq('date', today)
-        .single();
+        .maybeSingle();
 
       if (todayData) {
         // localBonusMins is intentionally NOT seeded from the DB.

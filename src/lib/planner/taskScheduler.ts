@@ -142,7 +142,13 @@ export function scheduleDeadlinesBeforeDueDate(args: {
       const avail = remainingAfterWeekly[date] ?? 0;
       if (avail <= 0) continue;
 
-      const take = Math.min(avail, remaining);
+      // 🎯 THE FIX: Cap Homework at 50% of the daily capacity
+      // This ensures a 240m Tuesday still has 120m left for Revision.
+      const dailyCapForHomework = Math.floor(baseCapacityByDate[date] * 0.5);
+      const currentlyUsedByHw = (deadlineItemsByDate[date] || []).reduce((s, i) => s + i.minutes, 0);
+      const remainingHwAllowance = Math.max(0, dailyCapForHomework - currentlyUsedByHw);
+      
+      const take = Math.min(avail, remaining, remainingHwAllowance);
       if (take <= 0) continue;
 
       deadlineItemsByDate[date].push({

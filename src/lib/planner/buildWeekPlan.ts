@@ -1,4 +1,5 @@
 import { addDays, daysBetween } from "./revisionEngine";
+import { toDateOnly } from "./dateUtils";
 
 export type DayPlan = {
   date: string;
@@ -68,12 +69,7 @@ export function buildWeekPlan({
       }));
   });
 
-// 1. HARMONIZE IDs & COMPLETIONS (Keep as is)
-  // 2. CAPACITY MAP (Keep as is)
-  // 3. WEEKLY ITEMS (Keep as is)
-
   // 🎯 4. REVISION 
-  // 🎯 4. REVISION (Processing BEFORE Homework)
   const revisionItems: Record<string, any[]> = {};
   const occupiedCap: Record<string, number> = {}; 
   
@@ -87,7 +83,7 @@ export function buildWeekPlan({
     if (processedRevisionIds.has(slot.id)) return;
     
     // Strict date normalization
-    const assignedDate = slot.date ? String(slot.date).split('T')[0].split(' ')[0] : null;
+    const assignedDate = slot.date ? slot.date.split('T')[0] : null;
     
     if (assignedDate && revisionItems[assignedDate]) {
       const isDone = slot.is_completed === true || todayCompletionKeys.has(`revision:${slot.id}`);

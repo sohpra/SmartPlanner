@@ -64,48 +64,47 @@ function getDynamicLabel(d: RevisionDemand, prefix = ""): string {
  * completionMap counts how many slots of each type have already been completed:
  *   { [`${examId}:standard`]: 3, [`${examId}:practice_paper`]: 1 }
  */
+
+
 export function buildRevisionDemands(
   exam: ExamInput,
   completionMap: Record<string, number> = {}
 ): RevisionDemand[] {
   const examDate = toDateOnly(exam.date);
-  const subject = (exam.subject ?? "Unknown").trim();
-  const preparedness = Math.max(0, Math.min(100, exam.preparedness ?? 50));
+  // 🛡️ Fix TS Error: Provide a fallback string if subject is null
+  const subjectName = (exam.subject ?? "Unknown Subject").trim();
 
-  // 🎯 THE FIX: Use requirements if they exist, otherwise fallback
   const requirements: SlotRequirement[] =
     exam.slot_requirements && Array.isArray(exam.slot_requirements) && exam.slot_requirements.length > 0
       ? exam.slot_requirements
       : FALLBACK_REQUIREMENTS[exam.exam_type] || FALLBACK_REQUIREMENTS.Internal;
 
-  // We use .flatMap because one requirement (e.g., "Standard x4") 
-  // needs to return a single demand object that carries the 'remainingSlots' total.
   return requirements.map((req): RevisionDemand => {
-    let count = req.count;
+    // 🎯 Use the count directly from the requirement
+    const totalCount = Number(req.count) || 0;
 
-    // 🛡️ ONLY apply the preparedness multiplier if it's a FALLBACK requirement.
-    // If the user set this in the modal, we treat it as an absolute "Target".
-    const isCustom = exam.slot_requirements && exam.slot_requirements.length > 0;
-    
-    if (req.type === "standard" && !isCustom) {
-      const multiplier = Math.max(0.4, (100 - preparedness) / 50);
-      count = Math.max(1, Math.round(req.count * multiplier));
-    }
-
-    // 🎯 MATCHING FIX: Ensure the key matches exactly what's in the DB
     const completedKey = `${exam.id}:${req.type}`;
     const alreadyDone = completionMap[completedKey] ?? 0;
-    const remainingSlots = Math.max(0, count - alreadyDone);
+    const remaining = Math.max(0, totalCount - alreadyDone);
+
+    // 🔍 The "Console Truth" - Keep this to verify the math
+    if (subjectName.includes("Computer")) {
+      console.log(`🧬 [${subjectName}] MATH:`, {
+        requested: totalCount,
+        done: alreadyDone,
+        remaining: remaining
+      });
+    }
 
     return {
       examId: exam.id,
       examDate,
-      subject,
+      subject: subjectName, // 🛡️ Now guaranteed to be a string
       examType: exam.exam_type,
-      preparedness,
+      preparedness: exam.preparedness ?? 50,
       slotType: req.type,
       slotMinutes: req.duration_minutes,
-      remainingSlots, // The engine uses this to decide how many slots to loop through
+      remainingSlots: remaining, 
       minDaysBefore: req.min_days_before ?? defaultMinDays(exam.exam_type, req.type),
       maxDaysBefore: req.max_days_before ?? defaultMaxDays(exam.exam_type, req.type),
       competitive_exam_name: exam.competitive_exam_name,
@@ -187,6 +186,7 @@ export function planRevisionSlots(
     existingFixedPaperDates?: Record<string, string[]>; // examId → dates already used
   }
 ): RevisionPlanResult {
+  
   const startStr = toDateOnly(opts.startDate);
   const windowDates = buildDateWindow(startStr, opts.numDays);
 
@@ -197,8 +197,21 @@ export function planRevisionSlots(
 
   const paperDemands  = allDemands.filter((d) => d.slotType === "practice_paper");
   const standardDemands = allDemands
-    .filter((d) => d.slotType !== "practice_paper")
-    .sort((a, b) => daysBetween(startStr, a.examDate) - daysBetween(startStr, b.examDate));
+  .filter((d) => d.slotType !== "practice_paper")
+  .sort((a, b) => {
+    // 1. Prioritize shorter slots (30m) so they don't get blocked by 120m slots
+    if (a.slotMinutes !== b.slotMinutes) return a.slotMinutes - b.slotMinutes;
+    // 2. Then sort by proximity to exam
+    return daysBetween(startStr, a.examDate) - daysBetween(startStr, b.examDate);
+  });
+    // ── 🧪 NUCLEAR DEBUG LOG ──────────────────────────────────────────────────
+  const tuesdayKey = "2026-03-03"; 
+  console.log("🧪 TUESDAY ENGINE VIEW:", {
+    exists: !!opts.capacityByDate[tuesdayKey],
+    capacity: opts.capacityByDate[tuesdayKey],
+    isStandardDemandsEmpty: standardDemands.length === 0,
+    csDemand: standardDemands.find(d => d.subject.includes("Computer")),
+  });
 
   // Build daily plan objects
   const days: DailyRevisionPlan[] = windowDates.map((date) => ({
@@ -325,45 +338,45 @@ export function planRevisionSlots(
     }
   }
 
-  // ── PHASE A: Polite interleaving (2 passes, max 1–2 subjects per day) ─────
-  for (let pass = 1; pass <= 2; pass++) {
+  // ── PHASE A: Standard Slot Placement ──────────────────────────────────────
+  for (let pass = 1; pass <= 4; pass++) {
     for (const day of days) {
-      if (day.remainingMinutes <= 0) continue;
+      // 🎯 THE FIX: If the day has room for even one slot, consider it.
+      if (day.remainingMinutes < 30) continue; 
 
       for (const demand of standardDemands) {
         if (demand.remainingSlots <= 0) continue;
 
-        // 🛡️ THE GUARD: 
-        // "Has this exam already been placed on THIS specific date?"
-        const alreadyPlannedToday = day.slots.some(s => s.examId === demand.examId);
-        
-        // If it has, SKIP this day for this specific demand and move to the next day
-        if (alreadyPlannedToday) continue; 
-
         const gap = daysBetween(day.date, demand.examDate);
         if (gap <= 0) continue; 
-        if (day.remainingMinutes < demand.slotMinutes) continue;
 
-        const subjectCount = day.slots.filter(
-          (s) => s.subject === demand.subject && s.slotType !== "practice_paper"
-        ).length;
-        const limit = demand.examType === "Internal" ? 1 : pass === 1 ? 1 : 2;
+        // 🛡️ THE ONLY CHECK THAT MATTERS:
+        // If a 120m paper fits here, a 30m CS slot MUST fit here.
+        if (day.remainingMinutes >= demand.slotMinutes) {
+          
+          const existingSlotsForExam = day.slots.filter(s => s.examId === demand.examId).length;
+          
+          // 🚀 ALLOW TUESDAY TO BE A "CS HUB"
+          // If the day has > 100m, let it take up to 3 slots of CS immediately.
+          const dailyLimit = (day.capacityMinutes > 100) ? 3 : 1;
 
-        if (subjectCount < limit) {
-          day.slots.push({
-            date: day.date,
-            examId: demand.examId,
-            subject: demand.subject,
-            examType: demand.examType,
-            slotType: demand.slotType,
-            slotMinutes: demand.slotMinutes,
-            label: getDynamicLabel(demand),
-            isFixed: false,
-          });
-          day.usedMinutes += demand.slotMinutes;
-          day.remainingMinutes -= demand.slotMinutes;
-          taskCountByDate[day.date] = (taskCountByDate[day.date] || 0) + 1;
-          demand.remainingSlots--;
+          if (existingSlotsForExam < dailyLimit) {
+            day.slots.push({
+              date: day.date,
+              examId: demand.examId,
+              subject: demand.subject,
+              examType: demand.examType,
+              slotType: demand.slotType,
+              slotMinutes: demand.slotMinutes,
+              label: getDynamicLabel(demand),
+              isFixed: false,
+            });
+
+            day.usedMinutes += demand.slotMinutes;
+            day.remainingMinutes -= demand.slotMinutes;
+            taskCountByDate[day.date] = (taskCountByDate[day.date] || 0) + 1;
+            demand.remainingSlots--;
+          }
         }
       }
     }
