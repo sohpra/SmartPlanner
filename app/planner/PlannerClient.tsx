@@ -120,10 +120,11 @@ export default function PlannerPage() {
   const hasTasks = todayPlan ? todayPlan.plannedTaskCount > 0 : false;
   
   // 🚀 UNIFIED DISPLAY CALCULATION
-  const displayCompletedMins = useMemo(() => {
-    const planBase = todayPlan?.totalCompleted || 0;
-      return planBase + localBonusMins;
-  }, [todayPlan?.totalCompleted, localBonusMins]);
+const displayCompletedMins = useMemo(() => {
+  const checklistMins = todayPlan?.totalCompleted || 0;
+  // Checklist (Original + Pulled Forward) + Manual Buttons
+  return checklistMins + localBonusMins;
+}, [todayPlan?.totalCompleted, localBonusMins]);
 
   const isSecured = todayPlan ? (
     todayPlan.completedTaskCount >= todayPlan.plannedTaskCount || 
@@ -147,6 +148,7 @@ export default function PlannerPage() {
   }, [urlView]);
 
   // 🎯 FETCH LIVE STATS & HYDRATE BONUS
+  // Replace lines 155-181 with:
   useEffect(() => {
     const fetchStatsAndHistory = async () => {
       if (!todayPlan) return;
@@ -154,29 +156,29 @@ export default function PlannerPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // 1. Master Stats
       const { data: statsData } = await supabase.from('planner_stats').select('*').eq('user_id', user.id).single();
       if (statsData) setStats(statsData);
 
+      // 2. Today's Specifics
       const { data: todayData } = await supabase
         .from('daily_stats')
-        .select('mins_completed, mins_planned')
+        .select('manual_bonus_mins, mins_completed')
         .eq('user_id', user.id)
         .eq('date', today)
         .maybeSingle();
 
       if (todayData) {
-        // localBonusMins is intentionally NOT seeded from the DB.
-        // It's a session-only accumulator for the +15m / +30m buttons clicked
-        // THIS session. The DB already has the full historical total baked into
-        // mins_completed — if we re-seed localBonusMins from it, every page
-        // refresh adds the old bonus on top of itself again.
-        // localBonusMins starts at 0 on every page load (its useState default).
+        // 🎯 THE FIX: Directly seed the button bucket. 
+        // Pulled tasks are already accounted for in todayPlan.totalCompleted.
+        setLocalBonusMins(todayData.manual_bonus_mins || 0);
+        lastSyncedMins.current = (todayPlan.totalCompleted || 0) + (todayData.manual_bonus_mins || 0);
       }
       setIsHydrating(false);
     };
 
     fetchStatsAndHistory();
-  }, [today, todayPlan?.totalPlanned]); 
+  }, [today, !!todayPlan]); // Use !!todayPlan to run once plan exists
 
  const handleFullSync = async () => {
     setIsSyncing(true);
@@ -228,34 +230,31 @@ export default function PlannerPage() {
     const hasAnyActivity = (todayPlan.completedTaskCount > 0 || localBonusMins > 0);
     if (!hasAnyActivity) return;
 
+    // Replace the syncStats block (lines 201-224) with:
     const syncStats = async () => {
-      const currentTaskMins = todayPlan.totalCompleted || 0;
-      const totalToSave = currentTaskMins + localBonusMins;
+      const checklistMins = todayPlan.totalCompleted || 0;
+      const totalToSave = checklistMins + localBonusMins;
 
-      // Prevent redundant network calls
       if (totalToSave === lastSyncedMins.current) return;
 
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // 🎯 CRITICAL: Ensure 'sync_daily_stats' matches your SQL Function Name
-        // and these keys match the function's argument names exactly!
-        const { error } = await supabase.rpc('sync_daily_stats', {
+        // 🎯 CRITICAL: Pass 'localBonusMins' as the new argument
+        await supabase.rpc('sync_daily_stats', {
           target_user_id: user.id, 
           is_mission_secured: isSecured, 
           is_elite_day: isElite,
           planned_count: todayPlan.plannedTaskCount || 0, 
           completed_count: todayPlan.completedTaskCount || 0,
           planned_mins: todayPlan.totalPlanned || 0, 
-          completed_mins: totalToSave   
+          completed_mins: checklistMins, // Raw checklist work
+          added_manual_mins: localBonusMins // 🎯 New Manual Bucket
         });
-
-        if (error) throw error;
 
         lastSyncedMins.current = totalToSave;
 
-        // Refresh stats from DB
         const { data: newStats } = await supabase
           .from('planner_stats')
           .select('current_streak, longest_streak, elite_count, lifetime_bonus_mins')
@@ -282,20 +281,24 @@ export default function PlannerPage() {
   ]);
   
   // 🎉 Celebration Logic
-  // 🟡 FIX: Track both completedTaskCount AND isSecured so confetti only fires
+  // Track both completedTaskCount AND isSecured so confetti only fires
   // when the task actually completes the mission, not on every re-memoize.
-  const lastCelebratedState = useRef<string | null>(null);
+  const wasSecured = useRef(false);
+
   useEffect(() => {
-    if (!todayPlan || !isSecured || !hasTasks) return;
-    // Key = secured state + count — confetti won't re-fire unless something new changes
-    const celebrationKey = `${todayPlan.completedTaskCount}-${isSecured}`;
-    if (celebrationKey === lastCelebratedState.current) return;
-    lastCelebratedState.current = celebrationKey;
-    confetti({
-      particleCount: 150, spread: 70, origin: { y: 0.6 },
-      colors: isElite ? ['#a855f7', '#d946ef', '#3b82f6'] : ['#10b981', '#3b82f6', '#60a5fa']
-    });
-  }, [todayPlan?.completedTaskCount, isSecured, hasTasks, isElite]);
+    // 🎯 Only fire if we WEREN'T secured, and now we ARE
+    if (isSecured && !wasSecured.current && hasTasks) {
+      confetti({
+        particleCount: 150, 
+        spread: 70, 
+        origin: { y: 0.6 },
+        colors: isElite ? ['#a855f7', '#d946ef', '#3b82f6'] : ['#10b981', '#3b82f6', '#60a5fa']
+      });
+    }
+    
+    // Update the "Memory" of the secured state
+    wasSecured.current = isSecured;
+  }, [isSecured, hasTasks, isElite]);
 
   if (!activePlan || !todayPlan) {
     return (
