@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
-import { Rocket, ShieldCheck, Target, Calendar, Trophy, Clock, Loader2 } from "lucide-react";
+import { Rocket, ShieldCheck, Target, Calendar, Trophy, Clock, Loader2, Circle, Shield, Diamond, Crown, Zap, Star } from "lucide-react";
 import confetti from 'canvas-confetti';
 import { supabase } from "@/lib/supabase/client";
 
@@ -64,6 +64,7 @@ export default function PlannerPage() {
   
   const [isHydrating, setIsHydrating] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [hoveredTrophyDays, setHoveredTrophyDays] = useState<number | null>(null);
   
   // 🟡 FIX: dbBonusMins was set but never read — removed.
   // setDbBonusMins kept only for hydration seeding of localBonusMins.
@@ -318,35 +319,158 @@ const displayCompletedMins = useMemo(() => {
     plannedTaskCount: todayPlan.plannedTaskCount,
     totalPlannedMinutes: todayPlan.totalPlanned,
   };
+  // Define your milestones
+  // 🏆 Milestone Logic for Streak Progress
+    const milestones = [
+    { days: 0, label: 'Novice' },
+    { days: 14, label: 'Bronze' },
+    { days: 25, label: 'Silver' },
+    { days: 50, label: 'Gold' },
+    { days: 100, label: 'Platinum' },
+    { days: 150, label: 'Emerald' },
+    { days: 250, label: 'Diamond' },
+    { days: 365, label: 'Legendary' }
+  ];
+
+  const currentStreak = stats?.current_streak || 0;
+  const longestStreak = stats?.longest_streak || 0;
+
+  // Current and Next Badge Logic
+  const currentBadge = [...milestones].reverse().find(m => m.days <= currentStreak) || milestones[0];
+  const nextBadge = milestones.find(m => m.days > currentStreak) || milestones[milestones.length - 1];
+
+  const progressTowardsNext = nextBadge.days > currentBadge.days 
+    ? Math.min(100, ((currentStreak - currentBadge.days) / (nextBadge.days - currentBadge.days)) * 100)
+    : 100;
+
+  // 🎯 TROPHY CASE CONFIG (Mapped to your new milestones)
+  const trophyMilestones = [
+    { days: 14,  label: 'Bronze',    icon: Shield,  color: 'text-orange-700',   bg: 'bg-orange-50' },
+    { days: 25,  label: 'Silver',    icon: Star,  color: 'text-slate-400',    bg: 'bg-slate-50' },
+    { days: 50,  label: 'Gold',      icon: Zap,     color: 'text-yellow-500',   bg: 'bg-yellow-50' },
+    { days: 100, label: 'Platinum',  icon: Trophy,    color: 'text-cyan-400',     bg: 'bg-cyan-50' },
+    { days: 150, label: 'Emerald',   icon: Diamond, color: 'text-emerald-500',  bg: 'bg-emerald-50' },
+    { days: 250, label: 'Diamond',   icon: Diamond, color: 'text-blue-500',     bg: 'bg-blue-50' },
+    { days: 365, label: 'Legendary', icon: Crown,   color: 'text-purple-600',   bg: 'bg-purple-100' },
+  ];
 
   return (
     <Suspense fallback={<div>Loading Plan Bee...</div>}>
       <main className="mx-auto max-w-[1400px] px-4 py-4 md:py-8 space-y-4 md:space-y-6">
         <DashboardHeader />
 
+        {/* 📊 TOP STATS GRID */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-          <StatCard icon={<ShieldCheck className="w-6 h-6" />} label="Current Streak" val={`${stats?.current_streak || 0} Days`} color="emerald" />
-          <StatCard icon={<Rocket className="w-6 h-6" />} label="Longest Streak" val={`${stats?.longest_streak || 0} Days`} color="orange" />
           
-          <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex items-center gap-4 group hover:shadow-lg transition-all duration-300">
-            <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-100 group-hover:rotate-6 transition-transform">
-              <Trophy className="w-6 h-6 text-white" />
+          {/* 🟢 CURRENT STREAK + BADGE IDENTITY */}
+          <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col justify-between group hover:shadow-lg transition-all duration-300">
+            
+            {/* Header Row: Aligned icon and label */}
+            <div className="flex items-start gap-4">
+              <div className="h-12 w-12 shrink-0 rounded-2xl bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-100 text-white group-hover:scale-110 transition-transform">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div className="flex-1 pt-1">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Active Status</p>
+                <div className="flex items-baseline justify-between">
+                  {/* HERO: The Badge Name */}
+                  <p className="text-xl font-black italic text-emerald-600">
+                    {currentBadge.label} <span className="text-[10px] not-italic text-slate-400">({currentStreak}d)</span>
+                  </p>
+                  <p className="text-[8px] font-bold text-slate-400 uppercase italic">Rank</p>
+                </div>
+              </div>
             </div>
-            <div className="flex-1">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Elite Status</p>
-              <div className="flex items-center justify-between">
-                <p className="text-xl font-black italic text-purple-600">{stats?.elite_count || 0} Days</p>
-                <div className="flex flex-col items-end">
-                  <span className="text-[14px] font-black text-emerald-500 flex items-center gap-1">
-                    <Clock className="w-2.5 h-2.5" /> {Math.floor((stats?.lifetime_bonus_mins || 0) / 60)}h {(stats?.lifetime_bonus_mins || 0) % 60}m
-                  </span>
-                  <p className="text-[8px] font-bold text-gray-400 uppercase italic">Banked</p>
+
+            {/* Progress Area: Aligned with the Trophy Case row */}
+            <div className="mt-3 space-y-2">
+              <div className="h-1.5 w-full bg-emerald-50 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-1000 ease-out"
+                  style={{ width: `${progressTowardsNext}%` }}
+                />
+              </div>
+              
+              {/* Consistent bottom caption */}
+              <div className="min-h-[12px]">
+                <p className="text-[8px] font-black text-emerald-500 uppercase tracking-tighter">
+                  {nextBadge.days - currentStreak} days until {nextBadge.label} status
+                </p>
+              </div>
+            </div>
+          </div>
+
+        {/* 🟠 LONGEST STREAK + TROPHY CASE */}
+          <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col justify-between group hover:shadow-lg transition-all duration-300">
+            
+            <div className="flex items-start gap-4">
+              <div className="h-12 w-12 shrink-0 rounded-2xl bg-orange-500 flex items-center justify-center shadow-lg shadow-orange-100 text-white group-hover:scale-110 transition-transform">
+                <Rocket className="w-6 h-6" />
+              </div>
+              <div className="flex-1 pt-1">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Longest Streak</p>
+                <div className="flex items-baseline justify-between">
+                  <p className="text-xl font-black italic text-orange-600">
+                    {longestStreak} Days
+                  </p>
+                  <p className="text-[8px] font-bold text-slate-400 uppercase italic">Personal Best</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 mb-2">
+            {trophyMilestones.map((m) => {
+              const isUnlocked = longestStreak >= m.days;
+              const isNext = longestStreak < m.days && 
+                            (trophyMilestones.find(prev => prev.days > longestStreak)?.days === m.days);
+              const Icon = m.icon; 
+              return (
+                <div 
+                  key={m.days}
+                  onMouseEnter={() => setHoveredTrophyDays(m.days)}
+                  onMouseLeave={() => setHoveredTrophyDays(null)}
+                  className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all duration-500 relative ${
+                    isUnlocked 
+                      ? `${m.bg} ${m.color} scale-110 shadow-[0_0_10px_rgba(0,0,0,0.05)] border border-white/50` 
+                      : isNext 
+                        ? 'bg-gray-50 text-gray-300 animate-pulse border border-dashed border-gray-200' 
+                        : 'bg-gray-50 text-gray-100 grayscale opacity-10'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 ${isUnlocked ? 'drop-shadow-md' : ''}`} />
+                  
+                  {/* 🎇 Special "Glow" for high-tier unlocked badges */}
+                  {isUnlocked && m.days >= 100 && (
+                    <div className={`absolute inset-0 rounded-xl animate-ping opacity-20 ${m.bg}`} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          </div>
+          
+          {/* 🟣 ELITE STATUS */}
+          <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col group hover:shadow-lg transition-all duration-300">
+            <div className="flex items-start gap-4">
+              <div className="h-12 w-12 shrink-0 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-100 group-hover:rotate-6 transition-transform">
+                <Trophy className="w-6 h-6 text-white" />
+              </div>
+              <div className="flex-1 pt-1">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Elite Status</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xl font-black italic text-purple-600">{stats?.elite_count || 0} Days</p>
+                  <div className="flex flex-col items-end">
+                    <span className="text-[14px] font-black text-emerald-500 flex items-center gap-1">
+                      <Clock className="w-2.5 h-2.5" /> {Math.floor((stats?.lifetime_bonus_mins || 0) / 60)}h {(stats?.lifetime_bonus_mins || 0) % 60}m
+                    </span>
+                    <p className="text-[8px] font-bold text-gray-400 uppercase italic">Banked</p>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
-
+        
        <div className="flex items-center justify-between gap-4 mb-8">
         <div className="flex items-center gap-4">
           {todayPlan.totalPlanned > todayPlan.baseCapacity + 15 ? (
@@ -381,7 +505,7 @@ const displayCompletedMins = useMemo(() => {
             ))}
           </div>
         </div>
-
+          
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
           <div className={`${view === "daily" ? "lg:col-span-8" : "col-span-full"}`}>
             {view === "daily" && (
