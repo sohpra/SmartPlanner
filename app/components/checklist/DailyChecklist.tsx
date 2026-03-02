@@ -62,158 +62,99 @@ export default function DailyChecklist({ day, completions, allProjects = [], upc
   };
 
 const TaskRow = ({ item, isDone }: { item: any, isDone: boolean }) => (
-    <div className={`flex items-center justify-between p-4 rounded-[1.25rem] border transition-all duration-300 ${
-      isDone 
-        ? "opacity-50 bg-gray-50 border-gray-100 italic" 
-        : "bg-white border-gray-200 shadow-sm hover:border-blue-200"
-    }`}>
-      <div className="flex items-center gap-4">
-        <input 
-          type="checkbox" 
-          checked={isDone} 
-          onChange={() => handleToggle(item)} 
-          className="h-5 w-5 rounded-lg border-gray-300 text-blue-600 accent-blue-600 cursor-pointer transition-transform active:scale-90" 
-        />
-        <div>
-          <div className="flex flex-wrap items-center gap-2 mb-0.5">
-            <p className={`text-sm font-bold tracking-tight ${isDone ? "line-through text-gray-400" : "text-gray-800"}`}>
-              {item.name}
-            </p>
-            
-            {/* 🎯 BONUS BADGE: Clarifies why denominator didn't move */}
-            {item.isBonus && (
-              <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-600 uppercase italic tracking-tighter">
-                Bonus +1
-              </span>
-            )}
-
-            {/* 🎯 OVERDUE BADGE */}
-            {item.isOverdue && !isDone && (
-              <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md bg-red-100 text-red-600 uppercase animate-pulse">
-                Overdue
-              </span>
-            )}
-
-            {item.subject && (
-              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-tight ${
-                isDone ? "bg-gray-100 text-gray-400" : "bg-blue-50 text-blue-600"
-              }`}>
-                {item.subject}
-              </span>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400">
-            <Clock className="w-3 h-3" />
-            <span>{item.minutes} mins</span>
-            <span className="text-gray-200">•</span>
-            <span className="lowercase font-medium">{item.section}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 🎯 DEADLINE INDICATOR */}
-      {item.dueDate && !isDone && (
-        <div className="text-right hidden sm:block">
-          <p className="text-[8px] font-black text-gray-300 uppercase tracking-widest mb-0.5">Deadline</p>
-          <p className={`text-[10px] font-black italic ${item.isOverdue ? "text-red-400" : "text-slate-500"}`}>
-            {new Date(item.dueDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-          </p>
-        </div>
-      )}
-    </div>
-  );
-
-  return (
-    <div className="space-y-8">
-      {/* --- Main Objectives --- */}
-      <section className="space-y-4">
-        {activeItems.length > 0 ? (
-          activeItems.map((item) => (
-            <TaskRow key={`${item.type}-${item.id}`} item={item} isDone={false} />
-          ))
-        ) : (
-          <div className="py-10 text-center border-2 border-dashed border-gray-100 rounded-[2rem] bg-gray-50/50">
-            <p className="text-xs font-black uppercase tracking-widest text-gray-400 italic">Day Secured.</p>
-          </div>
-        )}
-      </section>
-
-      {/* --- Work Ahead Choice UI --- DISBLED FOR NOW 
+  <div className={`group flex items-center justify-between py-2 px-3 rounded-xl border transition-all duration-200 ${
+    isDone 
+      ? "opacity-40 bg-gray-50/50 border-transparent italic" 
+      : "bg-white border-slate-100 hover:border-blue-300 hover:shadow-sm"
+  }`}>
+    <div className="flex items-center gap-3 min-w-0">
+      {/* 🔘 Shrunken Checkbox */}
+      <input 
+        type="checkbox" 
+        checked={isDone} 
+        onChange={() => handleToggle(item)} 
+        className="h-4 w-4 rounded-md border-slate-300 text-blue-600 accent-blue-600 cursor-pointer transition-transform active:scale-90 shrink-0" 
+      />
       
-      <div className="pt-4">
-        {!showWorkAhead ? (
-          <button 
-            onClick={() => setShowWorkAhead(true)}
-            className="w-full py-4 rounded-2xl border-2 border-dashed border-slate-200 flex items-center justify-center gap-2 text-slate-400 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-all group"
-          >
-            <Plus className="w-4 h-4 group-hover:rotate-90 transition-transform" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Work Ahead / Add Bonus</span>
-          </button>
-        ) : (
-          <div className="bg-slate-900 rounded-[2.5rem] p-6 text-white space-y-6 animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center px-2">
-              <h3 className="text-xs font-black uppercase tracking-widest text-blue-400 flex items-center gap-2">
-                <FastForward className="w-4 h-4" /> Pull Forward
-              </h3>
-              <button onClick={() => setShowWorkAhead(false)} className="text-[10px] font-bold text-slate-500 hover:text-white">Cancel</button>
-            </div>
+      <div className="min-w-0 flex flex-col">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <p className={`text-[11px] font-black tracking-tight truncate ${isDone ? "line-through text-gray-400" : "text-slate-700"}`}>
+            {item.name}
+          </p>
+          
+          {/* 🏷️ Micro-Badges */}
+          {item.isBonus && (
+            <span className="text-[7px] font-black px-1 rounded-sm bg-purple-100 text-purple-600 uppercase italic">
+              +1
+            </span>
+          )}
 
-            <div className="space-y-3">
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] px-2">Active Projects</p>
-              <div className="grid grid-cols-1 gap-2">
-                {allProjects.filter(p => p.status === 'active').slice(0, 3).map(p => (
-                  <button 
-                    key={p.id}
-                    onClick={() => completions.toggle('project', p.id, 60)}
-                    className="flex items-center justify-between p-4 bg-slate-800 rounded-2xl hover:bg-blue-600 transition-all group"
-                  >
-                    <span className="text-sm font-bold tracking-tight">{p.name}</span>
-                    <div className="flex items-center gap-2 text-[10px] font-black text-blue-400 group-hover:text-white">
-                      <span>Log 60m</span>
-                      <ChevronRight className="w-3 h-3" />
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
+          {item.isOverdue && !isDone && (
+            <span className="text-[7px] font-black px-1 rounded-sm bg-red-100 text-red-600 uppercase animate-pulse">
+              !
+            </span>
+          )}
 
-            <div className="space-y-3">
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] px-2">Upcoming Revision</p>
-              <div className="grid grid-cols-1 gap-2">
-                {upcomingRevision.slice(0, 3).map(slot => (
-                  <button 
-                    key={slot.id}
-                    onClick={() => handlePullRevision(slot.id)}
-                    className="flex items-center justify-between p-4 bg-slate-800 rounded-2xl hover:bg-emerald-600 transition-all group text-left"
-                  >
-                    <div>
-                      <span className="text-sm font-bold tracking-tight block">{slot.subject}</span>
-                      <span className="text-[9px] text-slate-500 group-hover:text-emerald-100 font-bold uppercase">{slot.date}</span>
-                    </div>
-                    <ChevronRight className="w-3 h-3 text-slate-500 group-hover:text-white" />
-                  </button>
-                ))}
-              </div>
-            </div>
+          {item.subject && (
+            <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-tighter ${
+              isDone ? "bg-gray-100 text-gray-300" : "bg-blue-50 text-blue-600"
+            }`}>
+              {item.subject}
+            </span>
+          )}
+        </div>
+        
+        {/* 🕒 Metadata Line */}
+        <div className="flex items-center gap-2 text-[9px] font-bold text-slate-400">
+          <div className="flex items-center gap-1">
+            <Clock className="w-2.5 h-2.5" />
+            <span>{item.minutes}m</span>
           </div>
-        )}
+          <span className="opacity-30">•</span>
+          <span className="lowercase font-medium truncate opacity-70">{item.section}</span>
+        </div>
       </div>
-      */}
-
-      {/* --- Finalised Today --- */}
-      {finishedItems.length > 0 && (
-        <section className="pt-6 border-t border-gray-100">
-          <h3 className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em] mb-4 italic flex items-center gap-2">
-            <CheckCircle2 className="w-3 h-3" /> Finalised Today
-          </h3>
-          <div className="space-y-3">
-            {finishedItems.map((item) => (
-              <TaskRow key={`${item.type}-${item.id}`} item={item} isDone={true} />
-            ))}
-          </div>
-        </section>
-      )}
     </div>
-  );
+
+    {/* 📅 Minimal Deadline Indicator */}
+    {item.dueDate && !isDone && (
+      <div className="text-right pl-2 shrink-0">
+        <p className={`text-[9px] font-black italic tracking-tighter ${item.isOverdue ? "text-red-400" : "text-slate-300"}`}>
+          {new Date(item.dueDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+        </p>
+      </div>
+    )}
+  </div>
+);
+
+return (
+  <div className="space-y-4">
+    {/* --- Main Objectives --- */}
+    <section className="flex flex-col gap-1">
+      {activeItems.length > 0 ? (
+        activeItems.map((item) => (
+          <TaskRow key={`${item.type}-${item.id}`} item={item} isDone={false} />
+        ))
+      ) : (
+        <div className="py-6 text-center border-2 border-dashed border-slate-50 rounded-[1.5rem] bg-slate-50/30">
+          <p className="text-[9px] font-black uppercase tracking-widest text-slate-300 italic">Day Secured.</p>
+        </div>
+      )}
+    </section>
+
+    {/* --- Finalised Today --- */}
+    {finishedItems.length > 0 && (
+      <section className="pt-3 border-t border-slate-50">
+        <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 italic flex items-center gap-2 px-1">
+          <CheckCircle2 className="w-2.5 h-2.5 text-slate-300" /> Finalised Today
+        </h3>
+        <div className="flex flex-col gap-1">
+          {finishedItems.map((item) => (
+            <TaskRow key={`${item.type}-${item.id}`} item={item} isDone={true} />
+          ))}
+        </div>
+      </section>
+    )}
+  </div>
+);
 }

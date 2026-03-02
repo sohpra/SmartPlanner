@@ -14,7 +14,7 @@ import { WeeklyView } from "../components/dashboard/WeeklyView";
 import { MonthView } from "../components/dashboard/MonthView"; 
 import { DashboardHeader } from "../components/dashboard/DashboardHeader";
 import { ComingUp } from "../components/dashboard/ComingUp";
-
+import { RemindersCard } from "../components/reminders/reminders";
 // Hooks
 import { useExams } from "@/hooks/use-exams";
 import { useProjects } from "@/hooks/use-projects";
@@ -354,217 +354,181 @@ const displayCompletedMins = useMemo(() => {
     { days: 365, label: 'Legendary', icon: Crown,   color: 'text-purple-600',   bg: 'bg-purple-100' },
   ];
 
-  return (
-    <Suspense fallback={<div>Loading Plan Bee...</div>}>
-      <main className="mx-auto max-w-[1400px] px-4 py-4 md:py-8 space-y-4 md:space-y-6">
-        <DashboardHeader />
+return (
+  <Suspense fallback={<div>Loading Plan Bee...</div>}>
+    <main className="mx-auto max-w-[1600px] px-4 py-3 lg:h-screen lg:overflow-hidden flex flex-col gap-4">
+      
+      <DashboardHeader />
 
-        {/* 📊 TOP STATS GRID */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-          
-          {/* 🟢 CURRENT STREAK + BADGE IDENTITY */}
-          <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col justify-between group hover:shadow-lg transition-all duration-300">
-            
-            {/* Header Row: Aligned icon and label */}
-            <div className="flex items-start gap-4">
-              <div className="h-12 w-12 shrink-0 rounded-2xl bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-100 text-white group-hover:scale-110 transition-transform">
-                <ShieldCheck className="w-6 h-6" />
-              </div>
-              <div className="flex-1 pt-1">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Active Status</p>
-                <div className="flex items-baseline justify-between">
-                  {/* HERO: The Badge Name */}
-                  <p className="text-xl font-black italic text-emerald-600">
-                    {currentBadge.label} <span className="text-[10px] not-italic text-slate-400">({currentStreak}d)</span>
-                  </p>
-                  <p className="text-[8px] font-bold text-slate-400 uppercase italic">Rank</p>
-                </div>
-              </div>
+     {/* 📊 1. THE UNIFIED TOP STATS ROW (4 Columns) */}
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-3 shrink-0">
+      
+      {/* 🎯 1. TODAY'S LIVE MISSION */}
+      <div className={`p-4 rounded-[2rem] border transition-all duration-500 flex flex-col justify-between group ${
+        isElite ? 'bg-purple-50 border-purple-200 shadow-md' : 
+        isSecured ? 'bg-emerald-50 border-emerald-100 shadow-sm' : 
+        'bg-white border-slate-100 shadow-sm'
+      }`}>
+        <div className="flex justify-between items-start">
+          <div className="flex items-center gap-3">
+            <div className={`h-10 w-10 shrink-0 rounded-xl flex items-center justify-center text-white shadow-sm ${
+              isElite ? 'bg-purple-500' : isSecured ? 'bg-emerald-500' : 'bg-blue-600'
+            }`}>
+              <Target className="w-5 h-5" />
             </div>
-
-            {/* Progress Area: Aligned with the Trophy Case row */}
-            <div className="mt-3 space-y-2">
-              <div className="h-1.5 w-full bg-emerald-50 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-emerald-500 rounded-full transition-all duration-1000 ease-out"
-                  style={{ width: `${progressTowardsNext}%` }}
-                />
-              </div>
-              
-              {/* Consistent bottom caption */}
-              <div className="min-h-[12px]">
-                <p className="text-[8px] font-black text-emerald-500 uppercase tracking-tighter">
-                  {nextBadge.days - currentStreak} days until {nextBadge.label} status
-                </p>
+            <div>
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest italic leading-none mb-1">Today's Mission</p>
+              <div className="flex items-baseline gap-1">
+                <p className={`text-xl font-black italic tracking-tighter ${isElite ? 'text-purple-600' : isSecured ? 'text-emerald-600' : 'text-slate-900'}`}>{todayPlan.completedTaskCount}</p>
+                <p className="text-[9px] font-bold text-slate-400">/ {todayPlan.plannedTaskCount} </p>
               </div>
             </div>
           </div>
+          <button onClick={() => handleBonusEffort(15)} className="px-2 py-1 rounded-lg bg-slate-900 text-white text-[8px] font-black uppercase hover:bg-blue-600 transition-all active:scale-95 shadow-sm">+15m</button>
+        </div>
+        <div className="flex flex-col items-end mt-2 pt-2 border-t border-slate-100/50">
+          <p className={`text-[15px] font-black italic tracking-tighter leading-none ${isElite ? 'text-purple-600' : 'text-slate-700'}`}>
+            {Math.floor(displayCompletedMins/60)}h{displayCompletedMins%60}m <span className="text-[9px] text-slate-300">Banked</span>
+          </p>
+          <div className="w-full h-1 bg-slate-100 rounded-full mt-1.5 overflow-hidden">
+            <div className={`h-full transition-all duration-1000 ${isElite ? 'bg-purple-500' : 'bg-blue-600'}`} style={{ width: `${Math.min(100, (displayCompletedMins / (todayPlan.totalPlanned || 1)) * 100)}%` }} />
+          </div>
+        </div>
+      </div>
 
-        {/* 🟠 LONGEST STREAK + TROPHY CASE */}
-          <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col justify-between group hover:shadow-lg transition-all duration-300">
-            
-            <div className="flex items-start gap-4">
-              <div className="h-12 w-12 shrink-0 rounded-2xl bg-orange-500 flex items-center justify-center shadow-lg shadow-orange-100 text-white group-hover:scale-110 transition-transform">
-                <Rocket className="w-6 h-6" />
-              </div>
-              <div className="flex-1 pt-1">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Longest Streak</p>
-                <div className="flex items-baseline justify-between">
-                  <p className="text-xl font-black italic text-orange-600">
-                    {longestStreak} Days
-                  </p>
-                  <p className="text-[8px] font-bold text-slate-400 uppercase italic">Personal Best</p>
+      {/* 🟢 2. CURRENT STREAK */}
+      <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between group hover:border-emerald-100 transition-all">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 shrink-0 rounded-xl bg-emerald-500 flex items-center justify-center text-white shadow-sm">
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Active Streak</p>
+            <p className="text-sm font-black italic text-emerald-600 truncate uppercase tracking-tighter">{currentBadge.label} ({currentStreak}d)</p>
+          </div>
+        </div>
+        <div className="mt-3 space-y-1">
+          <div className="h-1.5 w-full bg-emerald-50 rounded-full overflow-hidden">
+            <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${progressTowardsNext}%` }} />
+          </div>
+          <p className="text-[8px] font-black text-emerald-500 uppercase tracking-tighter">
+            {nextBadge.days - currentStreak} days until {nextBadge.label}
+          </p>
+        </div>
+      </div>
+
+      {/* 🟠 3. BEST + DYNAMIC TROPHIES */}
+      <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between group hover:border-orange-100 transition-all">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 shrink-0 rounded-xl bg-orange-500 flex items-center justify-center text-white shadow-sm">
+            <Rocket className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Personal Best</p>
+            <p className="text-lg font-black italic text-orange-600 tracking-tighter">{longestStreak} Days</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 mt-2 px-0.5">
+          {trophyMilestones.map((m, index) => {
+            const isUnlocked = longestStreak >= m.days;
+            const isTarget = !isUnlocked && (index === 0 || longestStreak >= trophyMilestones[index - 1].days);
+            if (!isUnlocked && !isTarget) return null;
+            const Icon = m.icon;
+            return (
+              <div key={m.days} className="flex flex-col items-center gap-1">
+                <div className={`h-7 w-7 rounded-lg flex items-center justify-center transition-all ${isUnlocked ? `${m.bg} ${m.color} scale-105 shadow-sm` : 'bg-slate-50 text-slate-300 border border-dashed border-slate-200 animate-pulse'}`}>
+                  <Icon className="w-3.5 h-3.5" />
                 </div>
+                <span className={`text-[6px] font-black uppercase tracking-tighter ${isUnlocked ? 'text-slate-500' : 'text-slate-300'}`}>{m.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 🟣 4. ELITE STATUS */}
+      <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between group hover:border-purple-100 transition-all">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 shrink-0 rounded-xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center text-white shadow-sm">
+            <Trophy className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">Elite Count</p>
+            <div className="flex items-baseline justify-between">
+              <p className="text-lg font-black italic text-purple-600 tracking-tighter">{stats?.elite_count || 0} Days</p>
+              <div className="flex flex-col items-end">
+                <span className="text-[11px] font-black text-emerald-500 leading-none">{Math.floor((stats?.lifetime_bonus_mins || 0) / 60)}h</span>
+                <span className="text-[7px] font-bold text-slate-300 uppercase">Banked</span>
               </div>
             </div>
+          </div>
+        </div>
+        <div className="mt-2 text-right">
+          <p className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em] italic">Lifetime Excellence</p>
+        </div>
+      </div>
 
-            <div className="flex items-center gap-1.5 mb-2">
-            {trophyMilestones.map((m) => {
-              const isUnlocked = longestStreak >= m.days;
-              const isNext = longestStreak < m.days && 
-                            (trophyMilestones.find(prev => prev.days > longestStreak)?.days === m.days);
-              const Icon = m.icon; 
-              return (
-                <div 
-                  key={m.days}
-                  onMouseEnter={() => setHoveredTrophyDays(m.days)}
-                  onMouseLeave={() => setHoveredTrophyDays(null)}
-                  className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all duration-500 relative ${
-                    isUnlocked 
-                      ? `${m.bg} ${m.color} scale-110 shadow-[0_0_10px_rgba(0,0,0,0.05)] border border-white/50` 
-                      : isNext 
-                        ? 'bg-gray-50 text-gray-300 animate-pulse border border-dashed border-gray-200' 
-                        : 'bg-gray-50 text-gray-100 grayscale opacity-10'
-                  }`}
-                >
-                  <Icon className={`w-4 h-4 ${isUnlocked ? 'drop-shadow-md' : ''}`} />
-                  
-                  {/* 🎇 Special "Glow" for high-tier unlocked badges */}
-                  {isUnlocked && m.days >= 100 && (
-                    <div className={`absolute inset-0 rounded-xl animate-ping opacity-20 ${m.bg}`} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          </div>
-          
-          {/* 🟣 ELITE STATUS */}
-          <div className="bg-white p-5 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col group hover:shadow-lg transition-all duration-300">
-            <div className="flex items-start gap-4">
-              <div className="h-12 w-12 shrink-0 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-100 group-hover:rotate-6 transition-transform">
-                <Trophy className="w-6 h-6 text-white" />
-              </div>
-              <div className="flex-1 pt-1">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Elite Status</p>
-                <div className="flex items-center justify-between">
-                  <p className="text-xl font-black italic text-purple-600">{stats?.elite_count || 0} Days</p>
-                  <div className="flex flex-col items-end">
-                    <span className="text-[14px] font-black text-emerald-500 flex items-center gap-1">
-                      <Clock className="w-2.5 h-2.5" /> {Math.floor((stats?.lifetime_bonus_mins || 0) / 60)}h {(stats?.lifetime_bonus_mins || 0) % 60}m
-                    </span>
-                    <p className="text-[8px] font-bold text-gray-400 uppercase italic">Banked</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+    </div>
+
+      {/* 🕹️ 2. THE CONTROL BAR (Toggle & Reshuffle) */}
+      <div className="flex items-center justify-between gap-4 bg-white/40 p-1.5 rounded-2xl border border-slate-100 shrink-0">
+        <div className="inline-flex rounded-xl bg-gray-100 p-1">
+          {["daily", "weekly", "monthly"].map((v) => (
+            <button key={v} onClick={() => setView(v as any)} className={`px-6 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${view === v ? "bg-white shadow-sm text-blue-600" : "text-gray-400 hover:text-gray-700"}`}>
+              {v}
+            </button>
+          ))}
         </div>
         
-       <div className="flex items-center justify-between gap-4 mb-8">
-        <div className="flex items-center gap-4">
-          {todayPlan.totalPlanned > todayPlan.baseCapacity + 15 ? (
-            <div className="flex items-center gap-2 text-amber-600 bg-amber-50 px-4 py-2 rounded-2xl border border-amber-100">
-              <Clock className="w-4 h-4" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Over Capacity</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100">
-              <ShieldCheck className="w-4 h-4" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Plan Balanced</span>
-            </div>
-          )}
-        </div>
-
         <button 
           onClick={handleFullSync} 
           disabled={isSyncing} 
-          className="bg-slate-900 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 flex items-center justify-center gap-2 shadow-xl transition-all active:scale-95 disabled:opacity-50"
+          className="bg-slate-900 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 flex items-center gap-2 shadow-sm transition-all active:scale-95 disabled:opacity-50"
         >
-          {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />} 
-          Re-Shuffle Roadmap
+          {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Rocket className="w-3 h-3" />} Re-Shuffle
         </button>
       </div>
 
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
-          <div className="inline-flex rounded-xl bg-gray-100 p-1 w-full sm:w-auto">
-            {["daily", "weekly", "monthly"].map((v) => (
-              <button key={v} onClick={() => setView(v as any)} className={`flex-1 sm:flex-none px-6 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${view === v ? "bg-white shadow-sm text-blue-600" : "text-gray-400 hover:text-gray-700"}`}>
-                {v}
-              </button>
-            ))}
+      {/* 🏗️ 3. MAIN CONTENT GRID */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {view === "daily" ? (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
+            
+            {/* LEFT: TODAY'S CHECKLIST (Focused Frame) */}
+            <div className="lg:col-span-6 flex flex-col gap-4 min-h-0 relative h-full">
+               <div className={`absolute -inset-1 rounded-[2.5rem] transition-all duration-700 blur-xl opacity-10 ${isElite ? 'bg-purple-400' : isSecured ? 'bg-emerald-400' : 'bg-blue-400'}`} />
+               <div className="relative flex-1 bg-white rounded-[2.5rem] border-2 border-blue-600/10 shadow-sm flex flex-col min-h-0 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-50 flex items-center gap-3">
+                     <div className={`h-2 w-2 rounded-full animate-pulse ${isElite ? 'bg-purple-500' : 'bg-blue-600'}`} />
+                     <h2 className="text-xl font-black text-slate-900 italic tracking-tighter uppercase">Today</h2>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                     <DailyChecklist day={todayPlan} completions={checklistCompletions} allProjects={activeProjects} upcomingRevision={futureRevision} />
+                  </div>
+               </div>
+            </div>
+
+            {/* CENTER/RIGHT: THE HORIZON */}
+            <div className="lg:col-span-3 flex flex-col gap-4 min-h-0 overflow-y-auto custom-scrollbar pr-1">
+               {tomorrowPlan && <TomorrowChecklist day={tomorrowPlan} />}
+               <ComingUp projects={projects || []} exams={exams.upcoming || []} />
+            </div>
+            
+            {/* FAR RIGHT: ADMIN FEED */}
+            <div className="lg:col-span-3 flex flex-col min-h-0">
+              <RemindersCard date={today} />
+            </div>
           </div>
-        </div>
-          
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
-          <div className={`${view === "daily" ? "lg:col-span-8" : "col-span-full"}`}>
-            {view === "daily" && (
-              <div className="space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-1">Active Window</p>
-                    <h2 className="text-3xl font-black text-gray-900 italic tracking-tighter">Today</h2>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <MetricCard title="Mission Progress" val={todayPlan.completedTaskCount} total={todayPlan.plannedTaskCount} isElite={isElite} isSecured={isSecured} bonusCount={bonusCount} />
-                  
-                  <div className={`p-6 rounded-[2.5rem] border transition-all duration-500 ${isElite ? 'bg-purple-50 border-purple-200 shadow-lg' : isSecured ? 'border-emerald-100 bg-emerald-50/10' : 'bg-white border-gray-100 shadow-sm'}`}>
-                    <div className="flex justify-between items-start mb-2">
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Work Load</p>
-                      {displayCompletedMins > todayPlan.totalPlanned && (
-                        <span className="bg-purple-600 text-white text-[7px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse"><Clock className="w-2.5 h-2.5" /> +{displayCompletedMins - todayPlan.totalPlanned}m BONUS</span>
-                      )}
-                    </div>
-                    <div className="flex flex-col">
-                      <div className="flex items-baseline gap-1">
-                        <p className={`text-5xl font-black italic transition-colors ${isElite ? 'text-purple-600' : isSecured ? 'text-emerald-600' : 'text-slate-900'}`}>{Math.floor(displayCompletedMins / 60)}h<span className="text-2xl">{displayCompletedMins % 60}m</span></p>
-                        <p className="text-xl font-bold text-slate-300 italic">/ {Math.floor(todayPlan.totalPlanned / 60)}h{todayPlan.totalPlanned % 60}m</p>
-                      </div>
-                      <div className="mt-4 h-3 w-full bg-gray-100 rounded-full overflow-hidden p-0.5">
-                        <div className={`h-full rounded-full transition-all duration-1000 ${isElite ? 'bg-purple-500' : isSecured ? 'bg-emerald-500' : 'bg-blue-600'}`} style={{ width: `${Math.min(100, (displayCompletedMins / (todayPlan.totalPlanned || 1)) * 100)}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <section className="bg-white p-1 rounded-[2.1rem] ring-4 ring-blue-600/10 border border-blue-600/20">
-                  <div className="bg-white p-6 rounded-[2rem]">
-                    <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-6 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-600" />Priority Checklist</h3>
-                    <DailyChecklist day={todayPlan} completions={checklistCompletions} allProjects={activeProjects} upcomingRevision={futureRevision} />                  
-                  </div>
-                </section>
-
-                <div className="mt-8 pt-6 border-t border-gray-100 flex flex-wrap items-center justify-between gap-4">
-                  <div><p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 italic">Go Beyond the Plan</p><p className="text-[9px] text-slate-400 font-medium">Log extra heart and soul into today's work.</p></div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => handleBonusEffort(15)} className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-purple-50 text-purple-600 text-[10px] font-black uppercase tracking-widest border border-purple-100 hover:bg-purple-600 hover:text-white transition-all group shadow-sm"><Clock className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" /> +15m Effort</button>
-                    <button onClick={() => handleBonusEffort(30)} className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-br from-purple-600 to-fuchsia-600 text-white text-[10px] font-black uppercase tracking-widest shadow-md hover:shadow-lg transition-all group"><Rocket className="w-3.5 h-3.5 group-hover:animate-bounce" /> Elite Session (+30m)</button>
-                  </div>
-                </div>
-              </div>
-            )}
-            {view === "weekly" && <div className="animate-in fade-in zoom-in-95 duration-300"><WeeklyView plan={activePlan} exams={exams.upcoming || []} projects={projects || []} /></div>}
-            {view === "monthly" && <div className="animate-in fade-in zoom-in-95 duration-300"><MonthView plan={activePlan} exams={exams.upcoming || []} projects={projects || []} /></div>}    
+        ) : (
+          <div className="h-full overflow-y-auto custom-scrollbar">
+             {view === "weekly" && <div className="animate-in fade-in zoom-in-95 duration-300"><WeeklyView plan={activePlan} exams={exams.upcoming || []} projects={projects || []} /></div>}
+             {view === "monthly" && <div className="animate-in fade-in zoom-in-95 duration-300"><MonthView plan={activePlan} exams={exams.upcoming || []} projects={projects || []} /></div>}    
           </div>
-          {view === "daily" && tomorrowPlan && (
-            <aside className="lg:col-span-4 space-y-6"><TomorrowChecklist day={tomorrowPlan} /><ComingUp projects={projects || []} exams={exams.upcoming || []} /></aside>
-          )}
-        </div>
-      </main>
-    </Suspense>
-  );
+        )}
+      </div>
+    </main>
+  </Suspense>
+);
 }
 
 function StatCard({ icon, label, val, color }: any) {
