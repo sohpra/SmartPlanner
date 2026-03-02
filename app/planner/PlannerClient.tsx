@@ -125,7 +125,10 @@ export default function PlannerPage() {
       return planBase + localBonusMins;
   }, [todayPlan?.totalCompleted, localBonusMins]);
 
-  const isSecured = todayPlan ? todayPlan.completedTaskCount >= todayPlan.plannedTaskCount : false;
+  const isSecured = todayPlan ? (
+    todayPlan.completedTaskCount >= todayPlan.plannedTaskCount || 
+    (todayPlan.totalPlanned > 0 && displayCompletedMins >= todayPlan.totalPlanned)
+  ) : false;  
   const isElite = todayPlan && hasTasks ? (
     // 🎯 Higher priority: Did they actually finish more items than planned?
     todayPlan.completedTaskCount > todayPlan.plannedTaskCount || 
@@ -217,34 +220,42 @@ export default function PlannerPage() {
 
   // 🎯 2. THE SYNC: One single "Pipe" to the database
   useEffect(() => {
-    // THE IRON GATE: Only sync if we have a stable plan and are done hydrating
-    if (isHydrating || !todayPlan || todayPlan.plannedTaskCount === 0) return;
+    // 🎯 FIX: Allow sync even if plannedTaskCount is 0, as long as there is 
+    // completed work or bonus minutes to record.
+    if (isHydrating || !todayPlan) return;
+    
+    // Only skip if the day is truly untouched
+    const hasAnyActivity = (todayPlan.completedTaskCount > 0 || localBonusMins > 0);
+    if (!hasAnyActivity) return;
 
     const syncStats = async () => {
       const currentTaskMins = todayPlan.totalCompleted || 0;
       const totalToSave = currentTaskMins + localBonusMins;
 
+      // Prevent redundant network calls
       if (totalToSave === lastSyncedMins.current) return;
 
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        await supabase.rpc('sync_daily_stats', {
+        // 🎯 CRITICAL: Ensure 'sync_daily_stats' matches your SQL Function Name
+        // and these keys match the function's argument names exactly!
+        const { error } = await supabase.rpc('sync_daily_stats', {
           target_user_id: user.id, 
           is_mission_secured: isSecured, 
           is_elite_day: isElite,
-          planned_count: todayPlan.plannedTaskCount, 
-          completed_count: todayPlan.completedTaskCount,
-          planned_mins: todayPlan.totalPlanned, 
+          planned_count: todayPlan.plannedTaskCount || 0, 
+          completed_count: todayPlan.completedTaskCount || 0,
+          planned_mins: todayPlan.totalPlanned || 0, 
           completed_mins: totalToSave   
         });
 
+        if (error) throw error;
+
         lastSyncedMins.current = totalToSave;
 
-        // 🔴 FIX: stats is NOT in the dep array. It was being read here and written
-        // via setStats, which could create a feedback loop. We only need the latest
-        // stats from DB after a successful sync — fetch independently.
+        // Refresh stats from DB
         const { data: newStats } = await supabase
           .from('planner_stats')
           .select('current_streak, longest_streak, elite_count, lifetime_bonus_mins')
@@ -253,11 +264,11 @@ export default function PlannerPage() {
         if (newStats) setStats(newStats);
         
       } catch (err) { 
-        console.error("Sync Error:", err); 
+        console.error("❌ STATS SYNC ERROR:", err); 
       }
     };
 
-    const timer = setTimeout(syncStats, 1500);
+    const timer = setTimeout(syncStats, 1500); // Debounce to prevent spam
     return () => clearTimeout(timer);
 
   }, [
@@ -267,8 +278,6 @@ export default function PlannerPage() {
     isSecured, 
     isElite, 
     isHydrating, 
-    // 🔴 FIX: `stats` removed — it was written inside this effect (via setStats),
-    // including it would re-trigger the effect every time a sync completed.
     localBonusMins
   ]);
   
