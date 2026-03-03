@@ -227,7 +227,6 @@ export function planRevisionSlots(
   windowDates.forEach((d) => (taskCountByDate[d] = 0));
 
   // ── PHASE PP: Practice Papers (placed first, scored, marked isFixed) ────────
-  // Papers that already have fixed DB slots are skipped — we only place new ones.
   for (const demand of paperDemands) {
     if (demand.remainingSlots <= 0) continue;
 
@@ -237,24 +236,22 @@ export function planRevisionSlots(
 
     let papersToPlace = demand.remainingSlots;
 
-    // Candidate dates within the allowed window
     const candidates = windowDates.filter((date) => {
-      if (existingDates.has(date)) return false; // already has a paper
+      if (existingDates.has(date)) return false;
       const gap = daysBetween(date, demand.examDate);
       return gap >= demand.minDaysBefore && gap <= demand.maxDaysBefore;
     });
 
     const engineOccupied = Object.fromEntries(days.map((d) => [d.date, d.usedMinutes]));
 
-    // Score all candidates, sort best first
     const scored = candidates
       .map((date) => ({
         date,
         score: scoreDayForPracticePaper(
           date,
           demand.slotMinutes,
-          opts.capacityByDate,          // already reduced (homework/rocks removed)
-          opts.originalBaseCapMap,      // raw budget for busyness ratio
+          opts.capacityByDate,
+          opts.originalBaseCapMap,
           engineOccupied,
           taskCountByDate
         ),
@@ -262,31 +259,22 @@ export function planRevisionSlots(
       .filter((c): c is { date: string; score: number } => c.score !== null)
       .sort((a, b) => b.score - a.score);
 
-    // ── DIAGNOSTIC ───────────────────────────────────────────────────────────
-    console.log(`📄 Paper demand: ${demand.subject}`, {
-      slotMinutes: demand.slotMinutes,
-      minDaysBefore: demand.minDaysBefore,
-      maxDaysBefore: demand.maxDaysBefore,
-      examDate: demand.examDate,
-      candidateCount: candidates.length,
-      scoredCount: scored.length,
-      sampleCandidates: candidates.slice(0, 5).map(date => ({
-        date,
-        gap: daysBetween(date, demand.examDate),
-        reducedCap: opts.capacityByDate[date] ?? 0,
-        originalBase: opts.originalBaseCapMap[date] ?? 0,
-        engineUsed: engineOccupied[date] ?? 0,
-        free: (opts.capacityByDate[date] ?? 0) - (engineOccupied[date] ?? 0),
-        passesFloor: ((opts.capacityByDate[date] ?? 0) - (engineOccupied[date] ?? 0)) >= demand.slotMinutes,
-      })),
-    });
-    // ── END DIAGNOSTIC ───────────────────────────────────────────────────────
-
     for (const { date } of scored) {
       if (papersToPlace <= 0) break;
 
+      // 🎯 1. Proximity Check
+      const minGap = 4; 
+      const isTooClose = Array.from(existingDates).some(existingDate => {
+        return Math.abs(daysBetween(date, existingDate)) < minGap;
+      });
+
+      if (isTooClose && scored.length > papersToPlace + 2) {
+        continue; 
+      }
+
       const targetDay = days.find((d) => d.date === date)!;
 
+      // 🎯 2. Formal Placement
       targetDay.slots.push({
         date,
         examId: demand.examId,
@@ -298,85 +286,92 @@ export function planRevisionSlots(
         isFixed: true,
       });
 
+      // 🎯 3. Critical: Update the counters so the NEXT paper knows this day is now full
       targetDay.usedMinutes += demand.slotMinutes;
       targetDay.remainingMinutes -= demand.slotMinutes;
       taskCountByDate[date] = (taskCountByDate[date] || 0) + 1;
-      existingDates.add(date); // prevent double-placing on same date
+      
+      existingDates.add(date); 
       papersToPlace--;
     }
 
-    // If we couldn't place all papers, record in unmet (handled at end)
     demand.remainingSlots = papersToPlace;
   }
 
-  // ── PHASE 0: Final push — guaranteed standard slot day before exam ────────
-  for (const demand of standardDemands) {
-    if (demand.remainingSlots <= 0) continue;
+    // ── PHASE 0: Guaranteed FINAL standard slot day before exam ────────
+    for (const demand of standardDemands) {
+      if (demand.remainingSlots <= 0) continue;
 
-    const dayBefore = addDays(demand.examDate, -1);
-    const targetDay = days.find((d) => d.date === dayBefore);
-    if (!targetDay) continue;
+      const dayBefore = addDays(demand.examDate, -1);
+      const targetDay = days.find((d) => d.date === dayBefore);
+      if (!targetDay) continue;
 
-    const lockMinutes =
-      demand.examType === "Internal" ? 30 : demand.slotMinutes;
+      // 🎯 THE FIX: Ensure Competitive exams are included in the Final Push
+      const isHighStakes = demand.examType === "Board" || demand.examType === "Competitive";
+      
+      // Competitive exams should keep their full slot duration (e.g. 60m)
+      const lockMinutes = (demand.examType === "Internal") ? 30 : demand.slotMinutes;
 
-    if (targetDay.remainingMinutes >= lockMinutes) {
-      targetDay.slots.unshift({
-        date: dayBefore,
-        examId: demand.examId,
-        subject: demand.subject,
-        examType: demand.examType,
-        slotType: demand.slotType,
-        slotMinutes: lockMinutes,
-        label: getDynamicLabel(demand, "FINAL: "),
-        isFixed: false,
-      });
-      targetDay.usedMinutes += lockMinutes;
-      targetDay.remainingMinutes -= lockMinutes;
-      taskCountByDate[dayBefore] = (taskCountByDate[dayBefore] || 0) + 1;
-      demand.remainingSlots = Math.max(0, demand.remainingSlots - 1);
+      const alreadyHasSlot = targetDay.slots.some(s => s.examId === demand.examId);
+      if (alreadyHasSlot) continue;
+
+      // Use a slight "Overload" for the day before a Competitive exam
+      const dayBeforeBuffer = isHighStakes ? 15 : 0;
+
+      if (targetDay.remainingMinutes + dayBeforeBuffer >= lockMinutes) {
+        targetDay.slots.unshift({
+          date: dayBefore,
+          examId: demand.examId,
+          subject: demand.subject,
+          examType: demand.examType,
+          slotType: demand.slotType,
+          slotMinutes: lockMinutes,
+          label: getDynamicLabel(demand, "FINAL: "),
+          isFixed: false,
+        });
+        targetDay.usedMinutes += lockMinutes;
+        targetDay.remainingMinutes -= lockMinutes;
+        taskCountByDate[dayBefore] = (taskCountByDate[dayBefore] || 0) + 1;
+        demand.remainingSlots--;
+      }
     }
-  }
 
-  // ── PHASE A: Standard Slot Placement ──────────────────────────────────────
+  // ── PHASE A: Standard Slot Placement (With Spacing) ────────
+  // We use multiple passes to spread tasks across the window
   for (let pass = 1; pass <= 4; pass++) {
     for (const day of days) {
-      // 🎯 THE FIX: If the day has room for even one slot, consider it.
-      if (day.remainingMinutes < 30) continue; 
+      // Don't even try if the day is effectively full
+      if (day.remainingMinutes < 15) continue; 
 
       for (const demand of standardDemands) {
         if (demand.remainingSlots <= 0) continue;
 
         const gap = daysBetween(day.date, demand.examDate);
+        // Only place in the future relative to the day, and before the exam
         if (gap <= 0) continue; 
 
-        // 🛡️ THE ONLY CHECK THAT MATTERS:
-        // If a 120m paper fits here, a 30m CS slot MUST fit here.
-        if (day.remainingMinutes >= demand.slotMinutes) {
-          
-          const existingSlotsForExam = day.slots.filter(s => s.examId === demand.examId).length;
-          
-          // 🚀 ALLOW TUESDAY TO BE A "CS HUB"
-          // If the day has > 100m, let it take up to 3 slots of CS immediately.
-          const dailyLimit = (day.capacityMinutes > 100) ? 3 : 1;
+        // 🎯 THE SPACING RULE:
+        // Only allow a slot if this specific exam isn't already on this day.
+        // This prevents the "75m merge" by forcing the second 45m slot 
+        // to find a different day in the loop.
+        const alreadyHasSlot = day.slots.some(s => s.examId === demand.examId);
+        
+        if (!alreadyHasSlot && day.remainingMinutes >= demand.slotMinutes) {
+          day.slots.push({
+            date: day.date,
+            examId: demand.examId,
+            subject: demand.subject,
+            examType: demand.examType,
+            slotType: demand.slotType,
+            slotMinutes: demand.slotMinutes,
+            label: getDynamicLabel(demand),
+            isFixed: false,
+          });
 
-          if (existingSlotsForExam < dailyLimit) {
-            day.slots.push({
-              date: day.date,
-              examId: demand.examId,
-              subject: demand.subject,
-              examType: demand.examType,
-              slotType: demand.slotType,
-              slotMinutes: demand.slotMinutes,
-              label: getDynamicLabel(demand),
-              isFixed: false,
-            });
-
-            day.usedMinutes += demand.slotMinutes;
-            day.remainingMinutes -= demand.slotMinutes;
-            taskCountByDate[day.date] = (taskCountByDate[day.date] || 0) + 1;
-            demand.remainingSlots--;
-          }
+          day.usedMinutes += demand.slotMinutes;
+          day.remainingMinutes -= demand.slotMinutes;
+          taskCountByDate[day.date] = (taskCountByDate[day.date] || 0) + 1;
+          demand.remainingSlots--;
         }
       }
     }

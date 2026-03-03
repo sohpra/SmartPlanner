@@ -89,11 +89,6 @@ export function buildWeekPlan({
       const isDone = slot.is_completed === true || todayCompletionKeys.has(`revision:${slot.id}`);
       const mins = slot.duration_minutes || 30;
       const examName = slot.displayName || slot.description || "Revision Session";
-      // 🔴 FIX: slot.date from Supabase may include a timestamp ("2025-02-23T00:00:00").
-      // Comparing the raw value against a date-only string (today = "2025-02-23") means
-      // "2025-02-23T00:00:00" > "2025-02-23" is TRUE lexicographically, so every slot
-      // scheduled for today was incorrectly marked as bonus and excluded from counts.
-      // assignedDate is already normalized — use it for the comparison.
       const isBonus = examName.includes('[Bonus]');
 
       revisionItems[assignedDate].push({
@@ -110,6 +105,9 @@ export function buildWeekPlan({
   });
 
   // 🎯 5. HOMEWORK (Now running with full awareness of Revision)
+
+  const POLITE_BUFFER = 20;   
+  const OVERLOAD_BUFFER = 10; 
   const homeworkItems: Record<string, any[]> = {};
   windowDates.forEach(d => { homeworkItems[d] = []; });
 
@@ -146,20 +144,24 @@ export function buildWeekPlan({
     const searchStartDate = (todayIsSecured && windowDates[1]) ? windowDates[1] : today;
     const possibleDays = windowDates.filter(date => date >= searchStartDate && date <= dayBeforeDeadline);
 
-    // Pass 1: Polite Search (Respecting the 45m buffer)
-    for (const d of possibleDays) {
-      if (occupiedCap[d] + task.estimated_minutes + 45 <= baseCapMap[d]) {
-        placedDate = d; break;
-      }
-    }
-    // Pass 2: Emergency Search (No buffer)
-    if (!placedDate) {
+    // Pass 1: Polite Search 
       for (const d of possibleDays) {
-        if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d]) {
-          placedDate = d; break;
-        }
+    if (occupiedCap[d] + task.estimated_minutes + POLITE_BUFFER <= baseCapMap[d]) {
+      placedDate = d; 
+      break;
+    }
+  }
+
+  // Pass 2: Emergency Search (Now allows slight overflow)
+  if (!placedDate) {
+    for (const d of possibleDays) {
+      // 🚀 Logic: If task fits within Capacity + 10m, take it.
+      if (occupiedCap[d] + task.estimated_minutes <= baseCapMap[d] + OVERLOAD_BUFFER) {
+        placedDate = d; 
+        break;
       }
     }
+  }
     // Pass 3: The "Last Resort" (Ensures it gets done before due date)
     if (!placedDate) {
       placedDate = possibleDays.length > 0 ? dayBeforeDeadline : searchStartDate;
