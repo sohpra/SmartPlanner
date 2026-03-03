@@ -492,37 +492,41 @@ return (
       {/* 🏗️ 3. MAIN CONTENT GRID */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {view === "daily" ? (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
-            
-            {/* LEFT: TODAY'S CHECKLIST (Focused Frame) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">            
+            {/* 🏛️ LEFT: TODAY'S MISSION (6/12) */}
             <div className="lg:col-span-6 flex flex-col gap-4 min-h-0 relative h-full">
-               <div className={`absolute -inset-1 rounded-[2.5rem] transition-all duration-700 blur-xl opacity-10 ${isElite ? 'bg-purple-400' : isSecured ? 'bg-emerald-400' : 'bg-blue-400'}`} />
-               <div className="relative flex-1 bg-white rounded-[2.5rem] border-2 border-blue-600/10 shadow-sm flex flex-col min-h-0 overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-50 flex items-center gap-3">
-                     <div className={`h-2 w-2 rounded-full animate-pulse ${isElite ? 'bg-purple-500' : 'bg-blue-600'}`} />
-                     <h2 className="text-xl font-black text-slate-900 italic tracking-tighter uppercase">Today</h2>
+              <div className={`absolute -inset-1 rounded-[2.5rem] transition-all duration-700 blur-xl opacity-10 ${isElite ? 'bg-purple-400' : isSecured ? 'bg-emerald-400' : 'bg-blue-400'}`} />
+              <div className="relative flex-1 bg-white rounded-[2.5rem] border-2 border-blue-600/10 shadow-sm flex flex-col min-h-0 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-50 flex items-center gap-3 shrink-0">
+                    <div className={`h-2 w-2 rounded-full animate-pulse ${isElite ? 'bg-purple-500' : 'bg-blue-600'}`} />
+                    <h2 className="text-xl font-black text-slate-500 italic tracking-tighter uppercase">Today</h2>
                   </div>
                   <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                     <DailyChecklist day={todayPlan} completions={checklistCompletions} allProjects={activeProjects} upcomingRevision={futureRevision} />
+                    <DailyChecklist 
+                      day={todayPlan} 
+                      completions={checklistCompletions} 
+                      allProjects={activeProjects} 
+                      upcomingRevision={futureRevision} 
+                    />
                   </div>
-               </div>
-            </div>
-
-            {/* CENTER/RIGHT: THE HORIZON */}
-            <div className="lg:col-span-3 flex flex-col gap-4 min-h-0 overflow-y-auto custom-scrollbar pr-1">
-               {tomorrowPlan && <TomorrowChecklist day={tomorrowPlan} />}
-               <ComingUp projects={projects || []} exams={exams.upcoming || []} />
+              </div>
             </div>
             
-            {/* FAR RIGHT: ADMIN FEED */}
-            <div className="lg:col-span-3 flex flex-col min-h-0">
+            {/* ➡️ MIDDLE: REMINDERS FEED (Reminders - 3/12) */}
+            <div className="lg:col-span-3 flex flex-col h-full min-h-0">
               <RemindersCard date={today} />
             </div>
+
+            {/* ➡️ RIGHT: THE HORIZON (Coming Up - 3/12) */}
+            <div className="lg:col-span-3 flex flex-col h-full min-h-0">
+              <ComingUp projects={projects || []} exams={exams.upcoming || []} />
+            </div>
+
           </div>
         ) : (
           <div className="h-full overflow-y-auto custom-scrollbar">
-             {view === "weekly" && <div className="animate-in fade-in zoom-in-95 duration-300"><WeeklyView plan={activePlan} exams={exams.upcoming || []} projects={projects || []} /></div>}
-             {view === "monthly" && <div className="animate-in fade-in zoom-in-95 duration-300"><MonthView plan={activePlan} exams={exams.upcoming || []} projects={projects || []} /></div>}    
+            {view === "weekly" && <div className="animate-in fade-in zoom-in-95 duration-300"><WeeklyView plan={activePlan} exams={exams.upcoming || []} projects={projects || []} /></div>}
+            {view === "monthly" && <div className="animate-in fade-in zoom-in-95 duration-300"><MonthView plan={activePlan} exams={exams.upcoming || []} projects={projects || []} /></div>}    
           </div>
         )}
       </div>
@@ -532,9 +536,7 @@ return (
 }
 
 function StatCard({ icon, label, val, color }: any) {
-  // 🟢 FIX: Never split Tailwind class strings at runtime — Tailwind's JIT/purge
-  // scans source for complete class strings. Dynamic splits produce classes that
-  // don't exist in the stylesheet.
+
   const colorMap: Record<string, { bg: string; shadow: string; text: string }> = {
     emerald: { bg: "bg-emerald-500", shadow: "shadow-emerald-100", text: "text-emerald-600" },
     orange:  { bg: "bg-orange-500",  shadow: "shadow-orange-100",  text: "text-orange-600"  },

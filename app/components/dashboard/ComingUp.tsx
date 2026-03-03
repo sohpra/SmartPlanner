@@ -37,8 +37,7 @@ export function ComingUp({ exams, projects = [] }: ComingUpProps) {
   }, [exams, projects, todayStr]);
 
   return (
-    <div className="bg-white rounded-[2rem] border border-slate-100 p-5 shadow-sm flex flex-col min-h-0">
-      <div className="flex justify-between items-center mb-4 shrink-0 px-1">
+      <div className="bg-white rounded-[2rem] border border-slate-100 p-5 shadow-sm flex flex-col h-full min-h-0 overflow-hidden">      <div className="flex justify-between items-center mb-4 shrink-0 px-1">
         <div className="flex items-center gap-2">
           <div className="p-1.5 bg-slate-50 rounded-lg text-slate-400">
             <Target className="w-3.5 h-3.5" />

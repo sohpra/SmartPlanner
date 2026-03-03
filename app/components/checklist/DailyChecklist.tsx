@@ -128,33 +128,41 @@ const TaskRow = ({ item, isDone }: { item: any, isDone: boolean }) => (
 );
 
 return (
-  <div className="space-y-4">
-    {/* --- Main Objectives --- */}
-    <section className="flex flex-col gap-1">
+  <div className="flex flex-col gap-6">
+    
+    {/* --- 1. Main Objectives --- */}
+    <div className="flex flex-col gap-1">
       {activeItems.length > 0 ? (
         activeItems.map((item) => (
           <TaskRow key={`${item.type}-${item.id}`} item={item} isDone={false} />
         ))
       ) : (
-        <div className="py-6 text-center border-2 border-dashed border-slate-50 rounded-[1.5rem] bg-slate-50/30">
-          <p className="text-[9px] font-black uppercase tracking-widest text-slate-300 italic">Day Secured.</p>
+        <div className="py-8 text-center border border-dashed border-slate-100 rounded-[1.5rem] bg-slate-50/20">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 italic">Day Secured.</p>
         </div>
       )}
-    </section>
+    </div>
 
-    {/* --- Finalised Today --- */}
+    {/* --- 2. Finalised Today --- */}
     {finishedItems.length > 0 && (
-      <section className="pt-3 border-t border-slate-50">
-        <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 italic flex items-center gap-2 px-1">
-          <CheckCircle2 className="w-2.5 h-2.5 text-slate-300" /> Finalised Today
-        </h3>
+      <div className="pt-4 border-t border-slate-50">
+        <div className="flex items-center justify-between mb-3 px-1">
+          <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic flex items-center gap-2">
+            <CheckCircle2 className="w-3 h-3 text-emerald-500/50" /> Finalised Today
+          </h3>
+          <span className="text-[8px] font-black text-slate-300 uppercase italic px-2 py-0.5 bg-slate-50 rounded-md">
+            {finishedItems.length} Done
+          </span>
+        </div>
+        
         <div className="flex flex-col gap-1">
           {finishedItems.map((item) => (
             <TaskRow key={`${item.type}-${item.id}`} item={item} isDone={true} />
           ))}
         </div>
-      </section>
+      </div>
     )}
   </div>
+
 );
 }
