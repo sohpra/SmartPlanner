@@ -354,6 +354,50 @@ const displayCompletedMins = useMemo(() => {
     { days: 365, label: 'Legendary', icon: Crown,   color: 'text-purple-600',   bg: 'bg-purple-100' },
   ];
 
+  const eliteMilestones = [
+    { count: 20,  label: 'Elite Initiate', icon: Zap,    color: 'text-yellow-500',  bg: 'bg-yellow-50' },
+    { count: 30,  label: 'Elite Veteran',  icon: Shield, color: 'text-blue-500',    bg: 'bg-blue-50' },
+    { count: 40,  label: 'Elite Master',   icon: Crown,  color: 'text-purple-600', bg: 'bg-purple-100' },
+    { count: 50, label: 'Elite Legend',   icon: Trophy, color: 'text-fuchsia-600',bg: 'bg-fuchsia-100' },
+  ];
+
+  const [activeMilestone, setActiveMilestone] = useState<any>(null);
+  const prevStats = useRef(stats);
+
+useEffect(() => {
+  if (!stats || !prevStats.current) {
+    prevStats.current = stats;
+    return;
+  }
+
+  // 1. RANK CELEBRATION (Stay as is: 14, 25, 50, etc.)
+  const streakMilestone = trophyMilestones.find(m => 
+    stats.current_streak === m.days && (prevStats.current?.current_streak || 0) < m.days
+  );
+
+  // 2. ELITE CELEBRATION (Every increment of 10)
+  // Logic: Current count is a multiple of 10 AND it just increased
+  const isEveryTenElite = stats.elite_count > 0 && 
+                          stats.elite_count % 10 === 0 && 
+                          (prevStats.current?.elite_count || 0) < stats.elite_count;
+
+  if (streakMilestone) {
+    setActiveMilestone({ ...streakMilestone, type: 'rank' });
+  } else if (isEveryTenElite) {
+    setActiveMilestone({
+      label: `${stats.elite_count} Elite Days`,
+      icon: Crown,
+      count: stats.elite_count,
+      type: 'elite',
+      color: 'text-purple-600',
+      bg: 'bg-purple-100'
+    });
+  }
+
+  prevStats.current = stats;
+}, [stats?.current_streak, stats?.elite_count]);
+      
+    
 return (
   <Suspense fallback={<div>Loading Plan Bee...</div>}>
     <main className="mx-auto max-w-[1600px] px-4 py-3 lg:h-screen lg:overflow-hidden flex flex-col gap-4">
@@ -531,6 +575,13 @@ return (
         )}
       </div>
     </main>
+    {/* 🎉 Milestone Pop-up */}
+    {activeMilestone && (
+      <MilestoneOverlay 
+        milestone={activeMilestone} 
+        onClose={() => setActiveMilestone(null)} 
+      />
+    )}
   </Suspense>
 );
 }
@@ -566,6 +617,59 @@ function MetricCard({ title, val, total, isElite, isSecured, bonusCount }: any) 
       <div className="flex items-baseline gap-2 relative z-10">
         <p className={`text-6xl font-black italic tracking-tighter transition-colors ${isElite ? 'text-purple-600' : isSecured ? 'text-emerald-600' : 'text-slate-900'}`}>{val}</p>
         <p className="text-2xl font-bold text-gray-300 not-italic">/ {total}</p>
+      </div>
+    </div>
+  );
+}
+
+function MilestoneOverlay({ milestone, onClose }: { milestone: any, onClose: () => void }) {
+  const isElite = milestone.type === 'elite';
+
+  useEffect(() => {
+    confetti({
+      particleCount: isElite ? 300 : 200, // Bigger burst for Elite!
+      spread: 80,
+      origin: { y: 0.5 },
+      colors: isElite ? ['#a855f7', '#d946ef', '#fbbf24'] : ['#3b82f6', '#10b981']
+    });
+  }, [isElite]);
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/70 backdrop-blur-md animate-in fade-in duration-300">
+      <div className="relative bg-white p-8 rounded-[3rem] shadow-2xl border-4 border-slate-100 max-w-sm w-full text-center animate-in zoom-in-95 slide-in-from-bottom-10 duration-500">
+        
+        {/* Dynamic Badge Icon */}
+        <div className={`mx-auto h-24 w-24 rounded-3xl ${milestone.bg} flex items-center justify-center mb-6 shadow-inner`}>
+          <milestone.icon className={`w-12 h-12 ${milestone.color}`} />
+        </div>
+
+        {/* Dynamic Label */}
+        <h2 className={`text-[10px] font-black uppercase tracking-[0.3em] mb-2 italic ${isElite ? 'text-purple-600' : 'text-blue-600'}`}>
+          {isElite ? 'Elite Achievement' : 'New Rank Unlocked'}
+        </h2>
+
+        <h3 className="text-4xl font-black italic text-slate-900 tracking-tighter mb-4 uppercase leading-none">
+          {milestone.label}
+        </h3>
+
+        {/* Dynamic Description */}
+        <p className="text-slate-500 font-medium text-sm mb-8 leading-relaxed">
+          {isElite 
+            ? `You've conquered ${milestone.count} Elite Days. Your commitment to maximum effort is exceptional.`
+            : `You've maintained a consistency streak of ${milestone.days} days. Your discipline is evolving.`
+          }
+        </p>
+
+          <button 
+            onClick={onClose}
+            className={`w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all active:scale-95 text-white shadow-md ${
+              isElite 
+                ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:shadow-purple-200' 
+                : 'bg-slate-900 hover:bg-blue-600 shadow-slate-200'
+            }`}
+            >
+            {isElite ? 'Stay Elite' : 'Keep Going'}
+          </button>
       </div>
     </div>
   );
